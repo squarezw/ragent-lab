@@ -40,14 +40,19 @@ def fixed_length_chunking(text, chunk_size=100):
 # 2. 基于句子的分块 (Sentence-Based)
 def sentence_based_chunking(text):
     """
-    按句子边界分块
+    按句子边界分块（中英文自适应）
     :param text: 输入文本
     :return: 句子列表
     """
-    # nltk.download('punkt', quiet=True)
-    # nltk.download('punkt_tab', force=True)
-    sentences = nltk.sent_tokenize(text)
-    return sentences
+    import re
+    # 判断是否为中文（出现中文字符的比例大于一定阈值）
+    chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+    ratio = len(chinese_chars) / max(len(text), 1)
+    if ratio > 0.2:  # 超过20%为中文，认为是中文文本
+        # 按中文句号、问号、感叹号、换行、冒号分割
+        return [s for s in re.split(r'[。！？:]', text) if s.strip()]
+    else:
+        return nltk.sent_tokenize(text)
 
 # 3. 基于段落的分块 (Paragraph-Based)
 def paragraph_based_chunking(text):
@@ -76,7 +81,7 @@ def sliding_window_chunking(text, window_size=3, stride=2):
     return chunks
 
 # 5. 语义分块 (Semantic)
-def semantic_chunking(text, threshold=0.85):
+def semantic_chunking(text, threshold=0.65):
     """
     基于嵌入相似度的语义分块
     :param text: 输入文本
@@ -107,6 +112,7 @@ def semantic_chunking(text, threshold=0.85):
 def recursive_chunking(text):
     """
     递归分块（使用LangChain实现）
+    结构优先，长度优先，不做语义分析，不考虑上下文，不考虑语境
     :param text: 输入文本
     :return: 分块列表
     """

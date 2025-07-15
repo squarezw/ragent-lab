@@ -1,4 +1,5 @@
 import streamlit as st
+import re
 from lab import strategies, text as default_text
 
 st.set_page_config(page_title="分段策略实验室", layout="wide")
@@ -15,6 +16,10 @@ col1, col2, col3 = st.columns([2, 1, 3])
 with col1:
     st.header("输入文本")
     user_text = st.text_area("请输入文本", value=default_text, height=400)
+    # 统计信息区域
+    char_count = len(user_text)
+    chinese_char_count = len(re.findall(r'[\u4e00-\u9fff]', user_text))
+    st.markdown(f"**字符数：** {char_count}  |  **中文字数：** {chinese_char_count}")
 
 with col2:
     st.header("选择分段策略")
@@ -49,10 +54,18 @@ with col3:
                 with st.container():
                     st.markdown(f"---\n**区块 {i+1}**")
                     st.json(chunk)
+                    # 统计区块内容的字符数和中文字数
+                    content = chunk.get('content', '')
+                    char_count = len(content)
+                    chinese_char_count = len(re.findall(r'[\u4e00-\u9fff]', content))
+                    st.markdown(f"<span style='color:gray'>字符数：{char_count} | 中文字数：{chinese_char_count}</span>", unsafe_allow_html=True)
         else:
             for i, chunk in enumerate(result):
                 with st.container():
                     st.markdown(f"---\n**区块 {i+1}**")
                     st.code(chunk, language=None)
+                    char_count = len(chunk)
+                    chinese_char_count = len(re.findall(r'[\u4e00-\u9fff]', chunk))
+                    st.markdown(f"<span style='color:gray'>字符数：{char_count} | 中文字数：{chinese_char_count}</span>", unsafe_allow_html=True)
     else:
         st.info("请点击左侧‘生成’按钮") 
