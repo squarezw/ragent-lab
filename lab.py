@@ -228,47 +228,58 @@ def hybrid_chunking(text):
 strategies = {
     "固定长度分块": {
         "func": fixed_length_chunking,
-        "desc": "将文本按固定字符长度分块，简单高效，适合无结构文本。"
+        "desc": "将文本按固定字符长度分块，简单高效，适合无结构文本。",
+        "rating": 1
     },
     "基于句子的分块": {
         "func": sentence_based_chunking,
-        "desc": "按句子边界分块，适合语义连贯的文本。中英文自适应。"
+        "desc": "按句子边界分块，适合语义连贯的文本。中英文自适应。",
+        "rating": 2
     },
     "基于段落的分块": {
         "func": paragraph_based_chunking,
-        "desc": "按段落分块，适合结构清晰、段落分明的文档。"
+        "desc": "按段落分块，适合结构清晰、段落分明的文档。",
+        "rating": 2
     },
     "滑动窗口分块": {
         "func": sliding_window_chunking,
-        "desc": "滑动窗口分块，解决分块边界信息丢失问题，适合上下文相关任务。"
+        "desc": "滑动窗口分块，解决分块边界信息丢失问题，适合上下文相关任务。",
+        "rating": 3
     },
     "语义分块": {
         "func": semantic_chunking,
-        "desc": "基于句子嵌入相似度的语义分块，自动聚合相关句子。"
+        "desc": "基于句子嵌入相似度的语义分块，自动聚合相关句子。",
+        "rating": 3
     },
     "递归分块": {
         "func": recursive_chunking,
-        "desc": "递归分块，优先按自然边界（段落/句子）分割，保证分块长度和结构。"
+        "desc": "递归分块，优先按自然边界（段落/句子）分割，保证分块长度和结构。",
+        "rating": 4
     },
     "语境丰富分块": {
         "func": context_enriched_chunking,
-        "desc": "为每个分块添加上下文标题，便于理解和检索。"
+        "desc": "为每个分块添加上下文标题，便于理解和检索。",
+        "rating": 3
     },
     "特定模态分块": {
         "func": modality_specific_chunking,
-        "desc": "针对多模态内容（如代码+文本）分块，适合混合内容场景。"
+        "desc": "针对多模态内容（如代码+文本）分块，适合混合内容场景。",
+        "rating": 4
     },
     "Agent分块": {
         "func": agentic_chunking,
-        "desc": "模拟 LLM 决策的分块策略，根据文本结构动态选择分块方式。"
+        "desc": "模拟 LLM 决策的分块策略，根据文本结构动态选择分块方式。",
+        "rating": 5
     },
     "子文档分块": {
         "func": subdocument_chunking,
-        "desc": "提取包含关键词的子文档，适合聚焦特定主题内容。"
+        "desc": "提取包含关键词的子文档，适合聚焦特定主题内容。",
+        "rating": 3
     },
     "混合分块": {
         "func": hybrid_chunking,
-        "desc": "组合多种分块策略，先按段落再对长段落做语义分块。"
+        "desc": "组合多种分块策略，先按段落再对长段落做语义分块。",
+        "rating": 4
     }
 }
 

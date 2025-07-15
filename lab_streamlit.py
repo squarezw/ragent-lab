@@ -24,11 +24,15 @@ with col1:
 with col2:
     st.header("分段策略")
     strategy_names = list(strategies.keys())
-    selected_strategy = st.selectbox("分段策略", strategy_names)
+    selected_strategy = st.radio("分段策略", strategy_names, index=0)
+    generate = st.button("生成")
     st.markdown("---")
     st.write("当前策略说明：")
     st.info(strategies[selected_strategy]["desc"])
-    generate = st.button("生成")
+    # 推荐指数星级展示
+    rating = strategies[selected_strategy].get("rating", 0)
+    stars = "★" * rating + "☆" * (5 - rating)
+    st.markdown(f"推荐指数：<span style='color:gold;font-size:22px'>{stars}</span>", unsafe_allow_html=True)
 
     # 只有点击生成时才更新结果
     if generate and user_text.strip():
