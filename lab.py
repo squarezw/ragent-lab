@@ -109,16 +109,17 @@ def semantic_chunking(text, threshold=0.65):
     return chunks
 
 # 6. 递归分块 (Recursive)
-def recursive_chunking(text):
+def recursive_chunking(text, chunk_size=150, chunk_overlap=20):
     """
     递归分块（使用LangChain实现）
-    结构优先，长度优先，不做语义分析，不考虑上下文，不考虑语境
     :param text: 输入文本
+    :param chunk_size: 分块长度（字符数）
+    :param chunk_overlap: 分块重叠（字符数）
     :return: 分块列表
     """
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=150,
-        chunk_overlap=20,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
         length_function=len
     )
     return splitter.split_text(text)
@@ -141,7 +142,7 @@ def context_enriched_chunking(text):
         })
     return enriched_chunks
 
-# 8. 特定模态分块 (Modality-Specific)
+# 8. 多模态分块 (Modality-Specific)
 def modality_specific_chunking(text):
     """
     处理多模态内容的分块（示例：代码+文本混合）
@@ -173,16 +174,16 @@ def modality_specific_chunking(text):
     if buffer: chunks.append({"type": current_type, "content": buffer})
     return chunks
 
-# 9. AI Agent 分块 (Agentic)
-def agentic_chunking(text):
+# 9. 主体性分块 (Agentic)
+def agentic_chunking(text, text_length=1000):
     """
     使用LLM决策的分块策略（模拟）
     :param text: 输入文本
+    :param text_length: 文本长度阈值，超过则用滑动窗口分块
     :return: 分块列表
     """
-    # 实际应用需集成LLM API
     print("模拟LLM决策：分析文档结构并动态选择分块策略")
-    if len(text) > 1000:
+    if len(text) > text_length:
         return sliding_window_chunking(text)
     elif '\n' in text:
         return paragraph_based_chunking(text)
@@ -190,7 +191,7 @@ def agentic_chunking(text):
         return fixed_length_chunking(text, chunk_size=150)
 
 # 10. 子文档分块 (Subdocument)
-def subdocument_chunking(text, keywords=['分块', '语义']):
+def subdocument_chunking(text, keywords=['电话']):
     """
     提取包含关键词的子文档
     :param text: 输入文本
@@ -205,10 +206,11 @@ def subdocument_chunking(text, keywords=['分块', '语义']):
     return subdocs
 
 # 11. 混合分块 (Hybrid)
-def hybrid_chunking(text):
+def hybrid_chunking(text, chunk_len=200):
     """
     组合多种分块策略
     :param text: 输入文本
+    :param chunk_len: 长段落的分块长度阈值
     :return: 分块列表
     """
     # 步骤1: 先按段落分块
@@ -217,7 +219,7 @@ def hybrid_chunking(text):
     # 步骤2: 对长段落进行语义分块
     final_chunks = []
     for chunk in chunks:
-        if len(chunk) > 200:
+        if len(chunk) > chunk_len:
             final_chunks.extend(semantic_chunking(chunk))
         else:
             final_chunks.append(chunk)
@@ -229,7 +231,10 @@ strategies = {
     "固定长度分块": {
         "func": fixed_length_chunking,
         "desc": "将文本按固定字符长度分块，简单高效，适合无结构文本。",
-        "rating": 1
+        "rating": 1,
+        "params": [
+            {"name": "chunk_size", "type": "int", "default": 100, "label": "分块长度（字符数）"}
+        ]
     },
     "基于句子的分块": {
         "func": sentence_based_chunking,
@@ -244,24 +249,35 @@ strategies = {
     "滑动窗口分块": {
         "func": sliding_window_chunking,
         "desc": "滑动窗口分块，解决分块边界信息丢失问题，适合上下文相关任务。",
-        "rating": 3
+        "rating": 3,
+        "params": [
+            {"name": "window_size", "type": "int", "default": 3, "label": "窗口大小（句子数）"},
+            {"name": "stride", "type": "int", "default": 2, "label": "滑动步长"}
+        ]
     },
     "语义分块": {
         "func": semantic_chunking,
         "desc": "基于句子嵌入相似度的语义分块，自动聚合相关句子。",
-        "rating": 3
+        "rating": 3,
+        "params": [
+            {"name": "threshold", "type": "float", "default": 0.85, "label": "相似度阈值（0~1）"}
+        ]
     },
     "递归分块": {
         "func": recursive_chunking,
         "desc": "递归分块，优先按自然边界（段落/句子）分割，保证分块长度和结构。",
-        "rating": 4
+        "rating": 4,
+        "params": [
+            {"name": "chunk_size", "type": "int", "default": 150, "label": "分块长度（字符数）"},
+            {"name": "chunk_overlap", "type": "int", "default": 20, "label": "分块重叠（字符数）"}
+        ]
     },
     "语境丰富分块": {
         "func": context_enriched_chunking,
         "desc": "为每个分块添加上下文标题，便于理解和检索。",
         "rating": 3
     },
-    "特定模态分块": {
+    "多模态分块": {
         "func": modality_specific_chunking,
         "desc": "针对多模态内容（如代码+文本）分块，适合混合内容场景。",
         "rating": 4
@@ -269,17 +285,26 @@ strategies = {
     "Agent分块": {
         "func": agentic_chunking,
         "desc": "模拟 LLM 决策的分块策略，根据文本结构动态选择分块方式。",
-        "rating": 5
+        "rating": 5,
+        "params": [
+            {"name": "text_length", "type": "int", "default": 1000, "label": "文本长度阈值"}
+        ]
     },
     "子文档分块": {
         "func": subdocument_chunking,
         "desc": "提取包含关键词的子文档，适合聚焦特定主题内容。",
-        "rating": 3
+        "rating": 3,
+        "params": [
+            {"name": "keywords", "type": "str", "default": "完善,电话,邮箱,###", "label": "关键词（逗号分隔）"}
+        ]
     },
     "混合分块": {
         "func": hybrid_chunking,
         "desc": "组合多种分块策略，先按段落再对长段落做语义分块。",
-        "rating": 4
+        "rating": 3,
+        "params": [
+            {"name": "chunk_len", "type": "int", "default": 200, "label": "长段落分块阈值（字符数）"}
+        ]
     }
 }
 
@@ -288,7 +313,17 @@ if __name__ == "__main__":
     for name, strategy_info in strategies.items():
         print(f"\n=== {name} ===\n")
         func = strategy_info["func"]
-        chunks = func(text)
+        # 处理策略参数
+        params = {}
+        if "params" in strategy_info:
+            for param_info in strategy_info["params"]:
+                name = param_info["name"]
+                default = param_info["default"]
+                label = param_info["label"]
+                value = input(f"请输入 {label} (默认: {default}): ") or default
+                params[name] = value
+
+        chunks = func(text, **params) # 传递参数给函数
 
         # 特殊处理字典类型输出
         if isinstance(chunks, list) and chunks and isinstance(chunks[0], dict):
