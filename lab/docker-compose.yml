@@ -1,0 +1,25 @@
+networks:
+  voicecan-network:
+    external: true
+
+services:
+  rag-lab:
+    image: rag-lab
+    container_name: rag-lab
+    networks:
+      - voicecan-network
+    expose:
+      - "8501"
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.rag-lab.rule=Host(`lab.ragents.net`)
+      - traefik.http.routers.rag-lab.entrypoints=web
+      - traefik.http.routers.rag-lab.middlewares=redirect-to-https@file
+      - traefik.http.routers.rag-labsecure.rule=Host(`lab.ragents.net`)
+      - traefik.http.routers.rag-labsecure.entrypoints=websecure
+      - traefik.http.routers.rag-labsecure.tls=true
+      - traefik.http.routers.rag-labsecure.tls.certresolver=myresolver
+      - traefik.http.routers.rag-labsecure.middlewares=cors@file 
