@@ -1,0 +1,27 @@
+# RAG 分段策略测试 Lab
+
+## 初始化 NLTK 数据（本地开发首次需运行）
+```bash
+python init_nltk_data.py
+```
+
+## 本地开发运行
+```bash
+# 激活 conda 环境
+conda env create -f environment.yml  # 仅首次
+conda activate rag-lab
+streamlit run lab_streamlit.py
+```
+
+## Docker 构建与部署
+```bash
+# 进入 lab 目录
+cd lab
+# 构建镜像
+docker build -t rag-lab .
+# 运行容器（后台，端口8501）
+docker run -d -p 8501:8501 --name rag-lab rag-lab
+```
+
+## 访问服务
+浏览器访问：http://服务器IP:8501

@@ -303,7 +303,7 @@ strategies = {
         "desc": "组合多种分块策略，先按段落再对长段落做语义分块。",
         "rating": 3,
         "params": [
-            {"name": "chunk_len", "type": "int", "default": 200, "label": "长段落分块阈值（字符数）"}
+            {"name": "chunk_len", "type": "int", "default": 500, "label": "长段落分块阈值（字符数）"}
         ]
     }
 }
