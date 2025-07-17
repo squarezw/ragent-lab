@@ -15,12 +15,17 @@ streamlit run lab_streamlit.py
 
 ## Docker 构建与部署
 ```bash
-# 进入 lab 目录
-cd lab
-# 构建镜像
-docker build -t rag-lab .
+# 构建镜像（从 docker 目录）
+docker build -t rag-lab docker/
 # 运行容器（后台，端口8501）
 docker run -d -p 8501:8501 --name rag-lab rag-lab
+```
+
+### 使用 Docker Compose（推荐）
+```bash
+# 在 docker 目录下运行
+cd docker
+docker-compose up -d
 ```
 
 ## 访问服务
