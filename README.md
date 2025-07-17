@@ -23,9 +23,7 @@ docker run -d -p 8501:8501 --name rag-lab rag-lab
 
 ### 使用 Docker Compose（推荐）
 ```bash
-# 在 docker 目录下运行
-cd docker
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 ## 访问服务
