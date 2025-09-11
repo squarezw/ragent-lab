@@ -9,11 +9,11 @@ from streamlit_javascript import st_javascript
 
 st.set_page_config(page_title="RAG 分段策略测试", layout="wide")
 
-# 右上角浮动联系邮箱（用 email SVG 图标）
+# 右上角浮动GitHub链接
 st.markdown(
     """
     <style>
-    .contact-float {
+    .github-float {
         position: fixed;
         top: 18px;
         right: 32px;
@@ -31,13 +31,13 @@ st.markdown(
         align-items: center;
         gap: 8px;
     }
-    .contact-float:hover { opacity: 1; }
-    .contact-float svg { vertical-align: middle; margin-right: 2px; }
+    .github-float:hover { opacity: 1; }
+    .github-float svg { vertical-align: middle; margin-right: 2px; }
     </style>
-    <div class="contact-float">
-        <a href="mailto:square.zhao.wei@gmail.com" style="text-decoration:none;color:inherit;display:flex;align-items:center;gap:6px;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"><path fill="#333" d="M2 6.75A2.75 2.75 0 0 1 4.75 4h14.5A2.75 2.75 0 0 1 22 6.75v10.5A2.75 2.75 0 0 1 19.25 20H4.75A2.75 2.75 0 0 1 2 17.25V6.75Zm2.75-1.25a1.25 1.25 0 0 0-1.25 1.25v.637l8.25 5.5 8.25-5.5V6.75a1.25 1.25 0 0 0-1.25-1.25H4.75Zm15.25 3.263-7.6 5.067a.75.75 0 0 1-.8 0L3 8.763v8.487c0 .69.56 1.25 1.25 1.25h14.5c.69 0 1.25-.56 1.25-1.25V8.763Z"/></svg>
-            square.zhao.wei@gmail.com
+    <div class="github-float">
+        <a href="https://github.com/squarezw/ragent-lab" target="_blank" style="text-decoration:none;color:inherit;display:flex;align-items:center;gap:6px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"><path fill="#333" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z"/></svg>
+            GitHub
         </a>
     </div>
     """,
