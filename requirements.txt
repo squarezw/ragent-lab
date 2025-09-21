@@ -4,4 +4,4 @@ numpy==1.26.4
 scikit-learn==1.4.2
 sentence-transformers==2.6.1
 langchain==0.1.16
-streamlit-javascript
+streamlit-javascript==0.1.5
