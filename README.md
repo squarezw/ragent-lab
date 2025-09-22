@@ -1,6 +1,6 @@
-# RAG Chunking Lab
+# RAG Lab
 
-一个用于RAG（检索增强生成）应用的文本分块策略综合工具包。
+一个用于RAG（检索增强生成）应用的文本分块和嵌入模型综合工具包。
 
 ## 项目结构
 
@@ -8,20 +8,22 @@
 ragent-lab/
 ├── src/ragent_lab/          # 主要源代码
 │   ├── chunking/            # 文本分块策略
-│   │   ├── __init__.py
 │   │   ├── base.py          # 基础工具和类
 │   │   ├── strategies.py    # 分块策略实现
 │   │   └── registry.py      # 策略注册和管理
+│   ├── embedding/           # 嵌入模型
+│   │   ├── base.py          # 基础嵌入类和工具
+│   │   ├── strategies.py    # 嵌入模型实现
+│   │   └── registry.py      # 模型注册和管理
 │   ├── config/              # 配置模块
-│   │   ├── __init__.py
 │   │   └── settings.py      # 应用配置
 │   ├── utils/               # 工具函数
-│   │   ├── __init__.py
 │   │   └── text_utils.py    # 文本处理工具
 │   ├── web/                 # Web界面
-│   │   ├── __init__.py
 │   │   ├── app.py          # 主应用
-│   │   └── components.py   # UI组件
+│   │   ├── components.py   # 分块UI组件
+│   │   ├── embedding_app.py # 嵌入应用
+│   │   └── embedding_components.py # 嵌入UI组件
 │   └── __init__.py
 ├── main.py                 # 主入口文件
 ├── streamlit_app.py        # Streamlit应用入口
@@ -44,25 +46,21 @@ ragent-lab/
 - **子文档分块**: 提取包含特定关键词的子文档
 - **混合分块**: 组合多种分块策略
 
-### Web界面
-
-- 交互式分块策略测试
-- 实时参数调整
-- 结果可视化展示
-- 响应式设计
-
 ## 安装和使用
 
 ### 环境要求
 
 - Python 3.8+
-- 依赖包见 `requirements.txt`
 
 ### 本地开发安装
 
 ```bash
 # 安装依赖
 pip install -r requirements.txt
+
+# 配置环境变量（可选）
+cp env.example .env
+# 编辑 .env 文件，填入你的 OpenAI API Key
 
 # 初始化 NLTK 数据（首次运行需要）
 python init_nltk_data.py
@@ -71,16 +69,14 @@ python init_nltk_data.py
 ### 本地运行
 
 ```bash
-# 方式1：直接运行Streamlit应用
-streamlit run streamlit_app.py
-
-# 方式2：使用统一入口（推荐）
+# 方式1：使用统一入口（推荐）
 python main.py web      # 启动Web界面
 python main.py cli      # 运行命令行演示
 ```
 
 ### 编程使用
 
+#### 文本分块
 ```python
 from ragent_lab.chunking import fixed_length_chunking, semantic_chunking
 from ragent_lab.config.settings import DEFAULT_TEXT
@@ -90,6 +86,31 @@ chunks = fixed_length_chunking(DEFAULT_TEXT, chunk_size=100)
 
 # 使用语义分块
 semantic_chunks = semantic_chunking(DEFAULT_TEXT, threshold=0.85)
+```
+
+#### 嵌入模型
+```python
+from ragent_lab.embedding import (
+    sentence_transformer_embedding,
+    openai_embedding,
+    get_all_models
+)
+
+# 使用 SentenceTransformer (默认使用BGE-M3)
+texts = ["Hello world", "你好世界"]
+result = sentence_transformer_embedding(texts)
+print(f"向量维度: {result.dimension}")
+
+# 使用指定的模型
+result = sentence_transformer_embedding(texts, "intfloat/multilingual-e5-large")
+
+# 使用 OpenAI (需要 API Key)
+result = openai_embedding(texts, api_key="your-api-key")
+
+# 获取所有可用模型
+models = get_all_models()
+for name, info in models.items():
+    print(f"{name}: {info['desc']}")
 ```
 
 ## Docker 部署
@@ -110,20 +131,6 @@ docker build -t rag-lab -f docker/Dockerfile .
 
 # 运行容器（后台，端口8501）
 docker run -d -p 8501:8501 --name rag-lab rag-lab
-```
-
-### 访问服务
-
-浏览器访问：http://localhost:8501
-
-## 运行测试
-
-```bash
-# 运行所有测试
-python -m pytest tests/
-
-# 运行特定测试
-python -m pytest tests/test_chunking.py
 ```
 
 ## 贡献

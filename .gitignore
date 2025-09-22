@@ -2,3 +2,4 @@ __pycache__/
 nltk_data/
 *.csv
 .DS_Store
+.env

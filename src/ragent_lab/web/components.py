@@ -67,11 +67,7 @@ def setup_page_config():
         unsafe_allow_html=True
     )
     
-    # Compact main title
-    st.markdown(
-        "<h1 style='margin-top: 0.5rem; margin-bottom: 1.2rem;'>RAG 分段策略测试</h1>",
-        unsafe_allow_html=True
-    )
+    # Title will be set dynamically based on the selected page
 
 
 def render_text_input(default_text: str) -> str:
