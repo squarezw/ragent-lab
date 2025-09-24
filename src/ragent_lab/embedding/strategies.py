@@ -25,8 +25,7 @@ class OpenAIEmbeddingModel(EmbeddingModel):
         """Get embedding dimension for OpenAI model."""
         dimension_map = {
             "text-embedding-3-small": 1536,
-            "text-embedding-3-large": 3072,
-            "text-embedding-ada-002": 1536
+            "text-embedding-3-large": 3072
         }
         return dimension_map.get(model_name, 1536)
     
@@ -248,6 +247,8 @@ class GMEEmbeddingModel(EmbeddingModel):
 def openai_embedding_model(model_name: str) -> OpenAIEmbeddingModel:
     """Create OpenAI embedding model."""
     return OpenAIEmbeddingModel(model_name)
+
+
 
 
 def sentence_transformer_embedding_model(model_name: str) -> SentenceTransformerEmbeddingModel:

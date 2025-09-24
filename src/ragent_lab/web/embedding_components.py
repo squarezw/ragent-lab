@@ -28,7 +28,8 @@ def get_registry_model_name(display_name: str) -> str:
         "SentenceTransformer BAAI/bge-m3": "bge_m3",
         "SentenceTransformer intfloat/multilingual-e5-large": "multilingual_e5_large",
         "SentenceTransformer intfloat/e5-mistral-7b-instruct": "e5_mistral_7b_instruct",
-        "GME Alibaba-NLP/gme-Qwen2-VL-2B-Instruct": "gme_qwen2_vl_2b_instruct"
+        "GME Alibaba-NLP/gme-Qwen2-VL-2B-Instruct": "gme_qwen2_vl_2b_instruct",
+        "Aliyun text-embedding-v4": "aliyun_text_embedding_v4"
     }
     return name_mapping.get(display_name, display_name)
 
@@ -176,12 +177,24 @@ def render_model_parameters(selected_model: str) -> Dict[str, Any]:
                 # For API keys, try to get from environment first
                 default_value = param["default"]
                 if "api_key" in param["name"].lower():
-                    env_key = os.getenv("OPENAI_API_KEY", "")
-                    if env_key:
-                        default_value = env_key
-                        st.info("✅ 已从环境变量加载 OpenAI API Key")
+                    # 根据模型类型确定环境变量名
+                    if "aliyun" in selected_model.lower():
+                        env_var_name = "Aliyun_API_KEY"
+                        env_key = os.getenv(env_var_name, "")
+                        if env_key:
+                            default_value = env_key
+                            st.info(f"✅ 已从环境变量加载阿里云 API Key")
+                        else:
+                            st.warning(f"⚠️ 未找到环境变量 {env_var_name}，请在 .env 文件中配置")
                     else:
-                        st.warning("⚠️ 未找到环境变量 OPENAI_API_KEY，请在 .env 文件中配置")
+                        # 默认使用 OpenAI API Key
+                        env_var_name = "OPENAI_API_KEY"
+                        env_key = os.getenv(env_var_name, "")
+                        if env_key:
+                            default_value = env_key
+                            st.info(f"✅ 已从环境变量加载 OpenAI API Key")
+                        else:
+                            st.warning(f"⚠️ 未找到环境变量 {env_var_name}，请在 .env 文件中配置")
                 
                 param_values[param["name"]] = st.text_input(
                     param["label"], 
@@ -208,7 +221,7 @@ def render_model_parameters(selected_model: str) -> Dict[str, Any]:
     return param_values
 
 
-def render_embedding_results(result: EmbeddingResult, query_text: str = ""):
+def render_embedding_results(result: EmbeddingResult, query_text: str = "", param_values: Dict[str, Any] = None):
     """Render embedding results with visualizations."""
     if result is None:
         st.info("请点击'生成 Embedding'按钮")
@@ -238,7 +251,13 @@ def render_embedding_results(result: EmbeddingResult, query_text: str = ""):
             
             if model_info:
                 model = model_info["model"]
-                query_result = model.embed([query_text])
+                
+                # 使用原始生成时的参数
+                embed_kwargs = {}
+                if param_values:
+                    embed_kwargs.update(param_values)
+                
+                query_result = model.embed([query_text], **embed_kwargs)
                 query_embedding = query_result.embeddings[0]
                 
                 # Calculate similarities between query and all texts
@@ -296,7 +315,7 @@ def render_embedding_results(result: EmbeddingResult, query_text: str = ""):
         st.json(result.metadata)
 
 
-def render_embedding_comparison(results: Dict[str, EmbeddingResult], query_text: str = ""):
+def render_embedding_comparison(results: Dict[str, EmbeddingResult], query_text: str = "", model_params: Dict[str, Dict[str, Any]] = None):
     """Render comparison between different embedding models."""
     if not results:
         return
@@ -343,7 +362,13 @@ def render_embedding_comparison(results: Dict[str, EmbeddingResult], query_text:
                 
                 if model_info:
                     model = model_info["model"]
-                    query_result = model.embed([query_text])
+                    
+                    # 使用对应模型的参数
+                    embed_kwargs = {}
+                    if model_params and model_name in model_params:
+                        embed_kwargs.update(model_params[model_name])
+                    
+                    query_result = model.embed([query_text], **embed_kwargs)
                     query_embedding = query_result.embeddings[0]
                     
                     # Calculate similarities between query and all texts

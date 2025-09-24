@@ -117,13 +117,15 @@ def create_embedding_app():
                     st.session_state['embedding_result'] = result
                     st.session_state['embedding_model'] = selected_model
                     st.session_state['embedding_query_text'] = query_text  # Store query text
+                    st.session_state['embedding_params'] = param_values  # Store parameters
                     st.success("Embedding 生成成功！")
     
     with col2:
         # Results section
         render_embedding_results(
             st.session_state['embedding_result'], 
-            query_text
+            query_text,
+            st.session_state.get('embedding_params', {})
         )
     
     # Comparison section (full width)
@@ -134,19 +136,31 @@ def create_embedding_app():
         if st.button("添加到对比"):
             current_result = st.session_state['embedding_result']
             current_model = st.session_state['embedding_model']
+            current_params = st.session_state.get('embedding_params', {})
+            
             st.session_state['embedding_comparison'][current_model] = current_result
+            # 保存模型参数
+            if 'embedding_comparison_params' not in st.session_state:
+                st.session_state['embedding_comparison_params'] = {}
+            st.session_state['embedding_comparison_params'][current_model] = current_params
+            
             st.success(f"已将 {current_model} 添加到对比")
         
         # Clear comparison
         if st.button("清空对比"):
             st.session_state['embedding_comparison'] = {}
+            st.session_state['embedding_comparison_params'] = {}
             st.success("已清空对比")
         
         # Show comparison
         if st.session_state['embedding_comparison']:
             # Get query text from session state or use default
             query_text = st.session_state.get('embedding_query_text', "")
-            render_embedding_comparison(st.session_state['embedding_comparison'], query_text)
+            render_embedding_comparison(
+                st.session_state['embedding_comparison'], 
+                query_text,
+                st.session_state.get('embedding_comparison_params', {})
+            )
     
     # Reference evaluation site section
     st.markdown("---")
