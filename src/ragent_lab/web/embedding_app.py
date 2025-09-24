@@ -31,6 +31,8 @@ def initialize_embedding_session_state():
         st.session_state['embedding_model'] = None
     if 'embedding_comparison' not in st.session_state:
         st.session_state['embedding_comparison'] = {}
+    if 'embedding_generating' not in st.session_state:
+        st.session_state['embedding_generating'] = False
 
 
 def handle_embedding_user_tracking():
@@ -109,15 +111,34 @@ def create_embedding_app():
         
         # Process embedding request
         if generate and texts:
+            st.session_state['embedding_generating'] = True
             with st.spinner("正在生成 embedding..."):
                 result = process_embedding_request(texts, selected_model, param_values)
                 if isinstance(result, str):  # Error message
                     st.error(result)
+                    st.session_state['embedding_generating'] = False
                 else:
                     st.session_state['embedding_result'] = result
                     st.session_state['embedding_model'] = selected_model
                     st.session_state['embedding_query_text'] = query_text  # Store query text
                     st.session_state['embedding_params'] = param_values  # Store parameters
+                    
+                    # Generate and cache query embedding for comparison
+                    if query_text:
+                        try:
+                            model = get_model(selected_model)
+                            if param_values:
+                                query_result = model.embed([query_text], **param_values)
+                            else:
+                                query_result = model.embed([query_text])
+                            st.session_state['embedding_query_embedding'] = query_result.embeddings[0]
+                        except Exception as e:
+                            st.warning(f"生成查询文本embedding时出错: {e}")
+                            st.session_state['embedding_query_embedding'] = None
+                    else:
+                        st.session_state['embedding_query_embedding'] = None
+                    
+                    st.session_state['embedding_generating'] = False
                     st.success("Embedding 生成成功！")
     
     with col2:
@@ -129,14 +150,15 @@ def create_embedding_app():
         )
     
     # Comparison section (full width)
-    if st.session_state['embedding_result']:
+    if st.session_state['embedding_result'] and not st.session_state['embedding_generating']:
         st.markdown("---")
         
-        # Add to comparison
-        if st.button("添加到对比"):
+        # Add to comparison - only enabled when embedding is successfully generated and not currently generating
+        if st.button("添加到对比", disabled=False):
             current_result = st.session_state['embedding_result']
             current_model = st.session_state['embedding_model']
             current_params = st.session_state.get('embedding_params', {})
+            current_query_embedding = st.session_state.get('embedding_query_embedding', None)
             
             st.session_state['embedding_comparison'][current_model] = current_result
             # 保存模型参数
@@ -144,12 +166,18 @@ def create_embedding_app():
                 st.session_state['embedding_comparison_params'] = {}
             st.session_state['embedding_comparison_params'][current_model] = current_params
             
+            # 保存查询文本的embedding
+            if 'embedding_comparison_query_embeddings' not in st.session_state:
+                st.session_state['embedding_comparison_query_embeddings'] = {}
+            st.session_state['embedding_comparison_query_embeddings'][current_model] = current_query_embedding
+            
             st.success(f"已将 {current_model} 添加到对比")
         
         # Clear comparison
         if st.button("清空对比"):
             st.session_state['embedding_comparison'] = {}
             st.session_state['embedding_comparison_params'] = {}
+            st.session_state['embedding_comparison_query_embeddings'] = {}
             st.success("已清空对比")
         
         # Show comparison
@@ -159,7 +187,8 @@ def create_embedding_app():
             render_embedding_comparison(
                 st.session_state['embedding_comparison'], 
                 query_text,
-                st.session_state.get('embedding_comparison_params', {})
+                st.session_state.get('embedding_comparison_params', {}),
+                st.session_state.get('embedding_comparison_query_embeddings', {})
             )
     
     # Reference evaluation site section

@@ -315,7 +315,7 @@ def render_embedding_results(result: EmbeddingResult, query_text: str = "", para
         st.json(result.metadata)
 
 
-def render_embedding_comparison(results: Dict[str, EmbeddingResult], query_text: str = "", model_params: Dict[str, Dict[str, Any]] = None):
+def render_embedding_comparison(results: Dict[str, EmbeddingResult], query_text: str = "", model_params: Dict[str, Dict[str, Any]] = None, query_embeddings: Dict[str, Any] = None):
     """Render comparison between different embedding models."""
     if not results:
         return
@@ -354,23 +354,31 @@ def render_embedding_comparison(results: Dict[str, EmbeddingResult], query_text:
         top_matches_data = []
         
         for model_name, result in results.items():
-            # Generate embedding for query text using the same model
+            # Use cached query embedding if available, otherwise generate new one
             try:
-                models = get_all_models()
-                registry_name = get_registry_model_name(result.model_name)
-                model_info = models.get(registry_name)
+                query_embedding = None
                 
-                if model_info:
-                    model = model_info["model"]
+                # First try to use cached query embedding
+                if query_embeddings and model_name in query_embeddings and query_embeddings[model_name] is not None:
+                    query_embedding = query_embeddings[model_name]
+                else:
+                    # Fallback: generate embedding for query text using the same model
+                    models = get_all_models()
+                    registry_name = get_registry_model_name(result.model_name)
+                    model_info = models.get(registry_name)
                     
-                    # 使用对应模型的参数
-                    embed_kwargs = {}
-                    if model_params and model_name in model_params:
-                        embed_kwargs.update(model_params[model_name])
-                    
-                    query_result = model.embed([query_text], **embed_kwargs)
-                    query_embedding = query_result.embeddings[0]
-                    
+                    if model_info:
+                        model = model_info["model"]
+                        
+                        # 使用对应模型的参数
+                        embed_kwargs = {}
+                        if model_params and model_name in model_params:
+                            embed_kwargs.update(model_params[model_name])
+                        
+                        query_result = model.embed([query_text], **embed_kwargs)
+                        query_embedding = query_result.embeddings[0]
+                
+                if query_embedding is not None:
                     # Calculate similarities between query and all texts
                     similarities = []
                     for i, text_embedding in enumerate(result.embeddings):
@@ -396,7 +404,7 @@ def render_embedding_comparison(results: Dict[str, EmbeddingResult], query_text:
                             "匹配文本": truncate_text(match['text'], 50)
                         })
                 else:
-                    st.warning(f"无法找到模型 {model_name} 的信息")
+                    st.warning(f"无法为模型 {model_name} 生成查询文本embedding")
             except Exception as e:
                 st.warning(f"模型 {model_name} 处理查询文本时出错: {e}")
                 continue
