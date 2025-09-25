@@ -107,9 +107,9 @@ def initialize_default_models():
     
     # Aliyun DashScope Embeddings
     register_model(
-        "aliyun_text_embedding_v4",
-        aliyun_embedding_model("text-embedding-v4", dimensions=1536),
-        "阿里云 text-embedding-v4 - 多语言统一文本向量模型，支持100+语种",
+        "aliyun_text_embedding_v2",
+        aliyun_embedding_model("text-embedding-v2"),
+        "阿里云 text-embedding-v2 - 多语言统一文本向量模型，支持100+语种",
         rating=5,
         params=[
             {
@@ -122,7 +122,7 @@ def initialize_default_models():
                 "name": "dimensions",
                 "label": "向量维度",
                 "type": "int",
-                "default": 1536,
+                "default": 1024,
                 "options": [2048, 1536, 1024, 768, 512, 256, 128, 64]
             }
         ]

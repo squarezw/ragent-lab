@@ -29,7 +29,7 @@ def get_registry_model_name(display_name: str) -> str:
         "SentenceTransformer intfloat/multilingual-e5-large": "multilingual_e5_large",
         "SentenceTransformer intfloat/e5-mistral-7b-instruct": "e5_mistral_7b_instruct",
         "GME Alibaba-NLP/gme-Qwen2-VL-2B-Instruct": "gme_qwen2_vl_2b_instruct",
-        "Aliyun text-embedding-v4": "aliyun_text_embedding_v4"
+        "Aliyun text-embedding-v2": "aliyun_text_embedding_v2"
     }
     return name_mapping.get(display_name, display_name)
 

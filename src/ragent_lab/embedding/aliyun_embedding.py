@@ -115,7 +115,7 @@ def aliyun_embedding_model(model_name: str, dimensions: int = 1536) -> AliyunEmb
     return AliyunEmbeddingModel(model_name, dimensions)
 
 
-def aliyun_embedding(texts: List[str], model_name: str = "text-embedding-v4", 
+def aliyun_embedding(texts: List[str], model_name: str = "text-embedding-v2", 
                      api_key: str = None, dimensions: int = 1536) -> EmbeddingResult:
     """直接调用阿里云嵌入的便捷函数"""
     model = aliyun_embedding_model(model_name, dimensions)
