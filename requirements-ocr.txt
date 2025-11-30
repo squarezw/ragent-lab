@@ -1,0 +1,13 @@
+# Optional OCR dependencies for OCR benchmark feature
+# Install with: pip install -r requirements-ocr.txt
+
+# PaddleOCR - Fast and accurate OCR with Chinese support
+paddleocr>=2.7.0
+paddlepaddle>=2.5.0
+
+# Tesseract OCR
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# Additional image processing libraries
+opencv-python>=4.8.0
