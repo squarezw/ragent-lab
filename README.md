@@ -15,6 +15,11 @@ ragent-lab/
 │   │   ├── base.py          # 基础嵌入类和工具
 │   │   ├── strategies.py    # 嵌入模型实现
 │   │   └── registry.py      # 模型注册和管理
+│   ├── ocr_benchmark/       # OCR 基准测试
+│   │   ├── base.py          # 基础OCR类和工具
+│   │   ├── strategies.py    # OCR模型实现
+│   │   ├── registry.py      # 模型注册和管理
+│   │   └── benchmark.py     # 基准测试框架
 │   ├── config/              # 配置模块
 │   │   └── settings.py      # 应用配置
 │   ├── utils/               # 工具函数
@@ -27,7 +32,8 @@ ragent-lab/
 │   └── __init__.py
 ├── main.py                 # 主入口文件
 ├── streamlit_app.py        # Streamlit应用入口
-└── requirements.txt        # 依赖文件
+├── requirements.txt        # 依赖文件
+└── requirements-ocr.txt    # OCR可选依赖
 ```
 
 ## 功能特性
@@ -46,6 +52,17 @@ ragent-lab/
 - **子文档分块**: 提取包含特定关键词的子文档
 - **混合分块**: 组合多种分块策略
 
+### OCR 基准测试 (NEW!)
+
+- **多引擎支持**: 支持 PaddleOCR、Tesseract OCR、DeepSeek OCR 等
+- **性能对比**: 自动测试和比较不同 OCR 引擎的性能
+- **准确度评估**: 支持与真实文本对比，计算识别准确度
+- **详细指标**: 处理时间、置信度、成功率等综合指标
+- **批量处理**: 支持批量图像识别和测试
+- **可扩展架构**: 轻松添加自定义 OCR 模型
+
+详细文档请参考: [OCR Benchmark 文档](docs/ocr_benchmark.md)
+
 ## 安装和使用
 
 ### 环境要求
@@ -57,6 +74,9 @@ ragent-lab/
 ```bash
 # 安装依赖
 pip install -r requirements.txt
+
+# 安装 OCR 功能依赖（可选）
+pip install -r requirements-ocr.txt
 
 # 配置环境变量（可选）
 cp env.example .env
@@ -111,6 +131,32 @@ result = openai_embedding(texts, api_key="your-api-key")
 models = get_all_models()
 for name, info in models.items():
     print(f"{name}: {info['desc']}")
+```
+
+#### OCR 基准测试
+```python
+from ragent_lab.ocr_benchmark import OCRBenchmark, list_ocr_models
+
+# 列出可用的 OCR 模型
+print(list_ocr_models())
+
+# 创建基准测试实例
+benchmark = OCRBenchmark(models=['paddleocr', 'tesseract'])
+
+# 运行基准测试
+image_paths = ['image1.jpg', 'image2.png']
+results = benchmark.benchmark_all(image_paths)
+
+# 打印结果
+benchmark.print_results(results)
+
+# 单独使用 OCR 模型
+from ragent_lab.ocr_benchmark import PaddleOCRModel
+
+model = PaddleOCRModel(lang='ch')
+result = model.recognize('document.jpg')
+print(f"识别文本: {result.text}")
+print(f"置信度: {result.confidence:.2%}")
 ```
 
 ## Docker 部署
