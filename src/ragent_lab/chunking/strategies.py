@@ -6,7 +6,7 @@ import re
 import numpy as np
 from typing import List, Union, Dict, Any
 from sentence_transformers import SentenceTransformer
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sklearn.metrics.pairwise import cosine_similarity
 
 from .base import get_sentences, ChunkingResult
