@@ -1,25 +1,32 @@
-networks:
-  voicecan-network:
-    external: true
-
+name: ragent-lab
 services:
-  rag-lab:
-    image: rag-lab
-    container_name: rag-lab
-    networks:
-      - voicecan-network
-    expose:
-      - "8501"
-    environment:
-      - STREAMLIT_SERVER_PORT=8501
-      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.rag-lab.rule=Host(`lab.ragents.net`)
-      - traefik.http.routers.rag-lab.entrypoints=web
-      - traefik.http.routers.rag-lab.middlewares=redirect-to-https@file
-      - traefik.http.routers.rag-labsecure.rule=Host(`lab.ragents.net`)
-      - traefik.http.routers.rag-labsecure.entrypoints=websecure
-      - traefik.http.routers.rag-labsecure.tls=true
-      - traefik.http.routers.rag-labsecure.tls.certresolver=myresolver
-      - traefik.http.routers.rag-labsecure.middlewares=cors@file 
+  api:
+    image: ${API_IMAGE:-ragent-lab-api:local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    volumes:
+      - model-cache:/cache/huggingface
+    mem_limit: 5g
+    cpus: 2.0
+    networks: [lab]
+  web:
+    image: ${WEB_IMAGE:-ragent-lab-web:local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${LAB_PORT:-8501}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [lab]
+volumes:
+  model-cache:
+networks:
+  lab:

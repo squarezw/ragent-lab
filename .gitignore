@@ -3,3 +3,14 @@ nltk_data/
 *.csv
 .DS_Store
 .env
+.claude
+docs/superpowers/
+frontend/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+.venv/
+.pytest_cache/
+.coverage
+.playwright-mcp/
+*.tsbuildinfo

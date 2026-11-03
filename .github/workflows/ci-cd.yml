@@ -1,0 +1,145 @@
+name: CI / CD
+on:
+  push:
+    branches: [master, dev, 'feat/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lab-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+jobs:
+  api:
+    name: Python API tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-api.txt
+      - run: pip install -r requirements-api.txt
+      - run: python -m unittest discover -s tests -v
+  web:
+    name: React checks and browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-api.txt
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test && npm run build
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-report
+          path: frontend/playwright-report/
+  images:
+    name: Build container images
+    needs: [api, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          file: docker/Dockerfile.${{ matrix.service }}
+          push: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository }}-${{ matrix.service }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          build-args: APP_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - name: Smoke test container startup
+        env:
+          SERVICE: ${{ matrix.service }}
+          IMAGE: ghcr.io/${{ github.repository }}-${{ matrix.service }}:${{ github.sha }}
+        run: |
+          if test "$SERVICE" = api; then
+            docker run --rm -e PYTHONPATH=/app/src "$IMAGE" python -c 'from sentence_transformers import SentenceTransformer; from ragent_lab.api.app import app; print(app.title)'
+          fi
+          docker run -d --name lab-smoke --add-host api:127.0.0.1 "$IMAGE"
+          for attempt in $(seq 1 40); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' lab-smoke)
+            if test "$status" = healthy; then docker rm -f lab-smoke; exit 0; fi
+            if test "$status" = unhealthy; then break; fi
+            sleep 3
+          done
+          docker logs lab-smoke
+          exit 1
+  deploy:
+    name: Deploy lab.ragents.net
+    needs: images
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_SSH_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/lab_deploy
+          chmod 600 ~/.ssh/lab_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload release
+        env:
+          REVISION: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          printf 'API_IMAGE=ghcr.io/%s-api:%s\nWEB_IMAGE=ghcr.io/%s-web:%s\n' "$REPOSITORY" "$REVISION" "$REPOSITORY" "$REVISION" > release.env
+          tar czf /tmp/lab-release.tgz docker deploy release.env
+          ssh -i ~/.ssh/lab_deploy -o BatchMode=yes root@209.209.40.180 "mkdir -p /opt/rag-lab/releases/$REVISION"
+          scp -i ~/.ssh/lab_deploy /tmp/lab-release.tgz "root@209.209.40.180:/opt/rag-lab/releases/$REVISION/release.tgz"
+      - name: Pull, deploy and verify
+        env:
+          REVISION: ${{ github.sha }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/lab_deploy root@209.209.40.180 "mkdir -p /opt/rag-lab/releases/$REVISION/.docker && chmod 700 /opt/rag-lab/releases/$REVISION/.docker && docker --config /opt/rag-lab/releases/$REVISION/.docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh -i ~/.ssh/lab_deploy root@209.209.40.180 "cd /opt/rag-lab/releases/$REVISION && tar xzf release.tgz && DOCKER_CONFIG=/opt/rag-lab/releases/$REVISION/.docker bash deploy/deploy.sh $REVISION"
+          curl --fail --retry 5 --retry-delay 5 https://lab.ragents.net/api/health | grep "$REVISION"
+      - name: Clear registry credentials
+        if: always()
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          if test -f ~/.ssh/lab_deploy; then
+            ssh -i ~/.ssh/lab_deploy root@209.209.40.180 "docker --config /opt/rag-lab/releases/$REVISION/.docker logout ghcr.io" || true
+          fi

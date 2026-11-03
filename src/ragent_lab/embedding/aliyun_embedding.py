@@ -16,7 +16,7 @@ class AliyunEmbeddingModel(EmbeddingModel):
             name=f"Aliyun {model_name}",
             description=f"Aliyun {model_name} embedding model",
             dimension=dimensions,
-            max_tokens=8192
+            max_tokens=2048 if model_name == "text-embedding-v2" else 8192
         )
         self.model_name = model_name
         self.dimensions = dimensions
@@ -31,40 +31,11 @@ class AliyunEmbeddingModel(EmbeddingModel):
                 
                 import openai
                 
-                # 创建客户端配置
-                client_kwargs = {
-                    'base_url': 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-                }
-                
-                if api_key:
-                    client_kwargs['api_key'] = api_key
-                
-                # 处理代理设置
-                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']
-                proxies = {}
-                
-                for var in proxy_vars:
-                    if var in os.environ:
-                        proxy_url = os.environ[var]
-                        if var.upper() in ['HTTP_PROXY', 'http_proxy']:
-                            proxies['http'] = proxy_url
-                        elif var.upper() in ['HTTPS_PROXY', 'https_proxy']:
-                            proxies['https'] = proxy_url
-                        elif var == 'all_proxy':
-                            proxies['http'] = proxy_url
-                            proxies['https'] = proxy_url
-                
-                # 添加代理配置
-                if proxies:
-                    try:
-                        import httpx
-                        http_client = httpx.Client(proxies=proxies)
-                        client_kwargs['http_client'] = http_client
-                    except Exception:
-                        # 静默忽略代理配置错误
-                        pass
-                
-                client = openai.OpenAI(**client_kwargs)
+                client = openai.OpenAI(
+                    api_key=api_key or os.getenv('Aliyun_API_KEY'),
+                    base_url='https://dashscope.aliyuncs.com/compatible-mode/v1',
+                    timeout=90.0, max_retries=1,
+                )
                 return client
                 
         except ImportError:
@@ -84,15 +55,22 @@ class AliyunEmbeddingModel(EmbeddingModel):
             dimensions = kwargs.get('dimensions', self.dimensions)
             
             try:
-                response = client.embeddings.create(
-                    model=self.model_name,
-                    input=texts,
-                    dimensions=dimensions,
-                    encoding_format="float"
-                )
-                
-                embeddings = [data.embedding for data in response.data]
-                
+                embeddings = []
+                usage = {}
+                batch_size = 25 if self.model_name == "text-embedding-v2" else 10
+                for offset in range(0, len(texts), batch_size):
+                    response = client.embeddings.create(
+                        model=self.model_name,
+                        input=texts[offset:offset + batch_size],
+                        **({"dimensions": dimensions} if self.model_name != "text-embedding-v2" else {}),
+                        encoding_format="float"
+                    )
+                    embeddings.extend(data.embedding for data in response.data)
+                    if getattr(response, 'usage', None):
+                        for name, value in response.usage.__dict__.items():
+                            if isinstance(value, (int, float)):
+                                usage[name] = usage.get(name, 0) + value
+
                 return EmbeddingResult(
                     embeddings=embeddings,
                     model_name=self.name,
@@ -100,7 +78,7 @@ class AliyunEmbeddingModel(EmbeddingModel):
                     metadata={
                         "model": self.model_name,
                         "dimensions": dimensions,
-                        "usage": response.usage.__dict__ if hasattr(response, 'usage') else {},
+                        "usage": usage,
                         "api_key_provided": bool(api_key),
                         "provider": "aliyun"
                     },

@@ -76,7 +76,7 @@ def initialize_default_models():
     register_model(
         "bge_m3",
         sentence_transformer_embedding_model("BAAI/bge-m3"),
-        "BAAI/bge-m3 - 1.2B多语言嵌入模型",
+        "BAAI/bge-m3 - 多语言嵌入模型",
         rating=5,
         params=[]
     )
@@ -84,7 +84,7 @@ def initialize_default_models():
     register_model(
         "multilingual_e5_large",
         sentence_transformer_embedding_model("intfloat/multilingual-e5-large"),
-        "intfloat/multilingual-e5-large - 1.2B E5多语言大模型",
+        "intfloat/multilingual-e5-large - E5多语言嵌入模型",
         rating=5,
         params=[]
     )
@@ -117,13 +117,6 @@ def initialize_default_models():
                 "label": "Aliyun_API_KEY",
                 "type": "str",
                 "default": ""
-            },
-            {
-                "name": "dimensions",
-                "label": "向量维度",
-                "type": "int",
-                "default": 1024,
-                "options": [2048, 1536, 1024, 768, 512, 256, 128, 64]
             }
         ]
     )
