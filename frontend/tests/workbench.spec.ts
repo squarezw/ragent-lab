@@ -42,6 +42,9 @@ test('mobile navigation and vision placeholder have no horizontal overflow', asy
   await page.getByRole('button', { name:'打开导航' }).click();
   await page.getByRole('link', { name:'图像理解' }).click();
   await expect(page.getByText('实验筹备中 · 暂未开放上传和推理')).toBeVisible();
+  const caption = await page.locator('.blueprint-footer span').boundingBox();
+  const frame = await page.locator('.blueprint').boundingBox();
+  expect(caption!.x + caption!.width).toBeLessThanOrEqual(frame!.x + frame!.width);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.getByRole('button', { name:'打开导航' }).click();
   await page.getByRole('link', { name:'文本分块', exact:true }).click();

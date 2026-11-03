@@ -1541,7 +1541,7 @@ main {
   letter-spacing: 1.6px;
   color: #91a67c;
 }
-.blueprint svg {
+.blueprint > svg {
   width: 100%;
   max-height: 275px;
 }
@@ -2295,7 +2295,7 @@ main {
     margin: 5px 20px 20px;
     max-height: 280px;
   }
-  .blueprint svg {
+  .blueprint > svg {
     max-height: 213px;
   }
   .blueprint-footer span {
