@@ -5,11 +5,16 @@ Various text chunking strategies for RAG applications.
 import re
 import numpy as np
 from typing import List, Union, Dict, Any
-from sentence_transformers import SentenceTransformer
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from functools import lru_cache
 from sklearn.metrics.pairwise import cosine_similarity
 
 from .base import get_sentences, ChunkingResult
+
+
+@lru_cache(maxsize=1)
+def _semantic_model():
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 
 
 def fixed_length_chunking(text: str, chunk_size: int = 100) -> List[str]:
@@ -84,14 +89,11 @@ def semantic_chunking(text: str, threshold: float = 0.65) -> List[str]:
     Returns:
         List of semantic chunks
     """
-    # Load embedding model
-    model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-    
     sentences = get_sentences(text)
     if len(sentences) <= 1:
         return sentences
     
-    embeddings = model.encode(sentences)
+    embeddings = _semantic_model().encode(sentences)
     
     chunks, current_chunk = [], [sentences[0]]
     for i in range(1, len(sentences)):
@@ -120,6 +122,7 @@ def recursive_chunking(text: str, chunk_size: int = 150, chunk_overlap: int = 20
     Returns:
         List of text chunks
     """
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,

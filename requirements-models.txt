@@ -1,0 +1,4 @@
+-r requirements-api.txt
+sentence-transformers>=3.4,<4
+transformers>=4.48,<5
+accelerate>=1,<2

@@ -3,7 +3,6 @@ Various embedding strategies and models for RAG applications.
 """
 
 from typing import List
-from sentence_transformers import SentenceTransformer
 
 from .base import EmbeddingModel, EmbeddingResult
 
@@ -35,39 +34,7 @@ class OpenAIEmbeddingModel(EmbeddingModel):
             import openai
             import os
             
-            # Create client with explicit proxy handling for latest version
-            client_kwargs = {}
-            if api_key:
-                client_kwargs['api_key'] = api_key
-            
-            # Handle proxy settings for latest OpenAI version
-            proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']
-            proxies = {}
-            
-            for var in proxy_vars:
-                if var in os.environ:
-                    proxy_url = os.environ[var]
-                    if var.upper() in ['HTTP_PROXY', 'http_proxy']:
-                        proxies['http'] = proxy_url
-                    elif var.upper() in ['HTTPS_PROXY', 'https_proxy']:
-                        proxies['https'] = proxy_url
-                    elif var == 'all_proxy':
-                        proxies['http'] = proxy_url
-                        proxies['https'] = proxy_url
-            
-            # Only add proxy configuration if proxies are found
-            if proxies:
-                try:
-                    # For latest OpenAI version, use http_client parameter
-                    import httpx
-                    # Create httpx client with proper proxy configuration
-                    http_client = httpx.Client(proxies=proxies)
-                    client_kwargs['http_client'] = http_client
-                except Exception as proxy_error:
-                    # Silently continue without proxy configuration
-                    pass
-            
-            client = openai.OpenAI(**client_kwargs)
+            client = openai.OpenAI(api_key=api_key or os.getenv('OPENAI_API_KEY'), timeout=90.0, max_retries=1)
             return client
             
         except ImportError:
@@ -156,6 +123,7 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
                 )
             else:
                 # Use sentence_transformers for other models
+                from sentence_transformers import SentenceTransformer
                 self._model = SentenceTransformer(self.model_name)
         return self._model
     

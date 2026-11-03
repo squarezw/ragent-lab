@@ -1,142 +1,98 @@
-# RAG Lab
+# Ragent Lab
 
-一个用于RAG（检索增强生成）应用的文本分块和嵌入模型综合工具包。
+React + FastAPI 的中文 AI 实验工作台，部署于 https://lab.ragents.net。
 
-## 项目结构
+- **文本分块**：11 种策略、参数调整、分块预览和长度统计。
+- **Embedding 对比**：7 个模型注册项、查询相似度排名、固定候选文本与查询的模型对比。
+- **图像理解**：工程图纸方向的独立规划页面，预留实验注册入口；尚未实现图片上传与推理。
 
-```
-ragent-lab/
-├── src/ragent_lab/          # 主要源代码
-│   ├── chunking/            # 文本分块策略
-│   │   ├── base.py          # 基础工具和类
-│   │   ├── strategies.py    # 分块策略实现
-│   │   └── registry.py      # 策略注册和管理
-│   ├── embedding/           # 嵌入模型
-│   │   ├── base.py          # 基础嵌入类和工具
-│   │   ├── strategies.py    # 嵌入模型实现
-│   │   └── registry.py      # 模型注册和管理
-│   ├── config/              # 配置模块
-│   │   └── settings.py      # 应用配置
-│   ├── utils/               # 工具函数
-│   │   └── text_utils.py    # 文本处理工具
-│   ├── web/                 # Web界面
-│   │   ├── app.py          # 主应用
-│   │   ├── components.py   # 分块UI组件
-│   │   ├── embedding_app.py # 嵌入应用
-│   │   └── embedding_components.py # 嵌入UI组件
-│   └── __init__.py
-├── main.py                 # 主入口文件
-├── streamlit_app.py        # Streamlit应用入口
-└── requirements.txt        # 依赖文件
-```
+## 本地开发
 
-## 功能特性
-
-### 文本分块策略
-
-- **固定长度分块**: 按固定字符长度分块
-- **基于句子的分块**: 按句子边界分块，支持中英文自适应
-- **基于段落的分块**: 按段落分块
-- **滑动窗口分块**: 解决分块边界信息丢失问题
-- **语义分块**: 基于句子嵌入相似度的语义分块
-- **递归分块**: 使用LangChain实现的递归分块
-- **语境丰富分块**: 为每个分块添加上下文标题
-- **多模态分块**: 针对混合内容（代码+文本）的分块
-- **Agent分块**: 模拟LLM决策的自适应分块
-- **子文档分块**: 提取包含特定关键词的子文档
-- **混合分块**: 组合多种分块策略
-
-## 安装和使用
-
-### 环境要求
-
-- Python 3.8+
-
-### 本地开发安装
+需要 Python 3.12、Node.js 24。
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 配置环境变量（可选）
-cp env.example .env
-# 编辑 .env 文件，填入你的 OpenAI API Key
-
-# 初始化 NLTK 数据（首次运行需要）
-python init_nltk_data.py
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-api.txt
+python -m nltk.downloader punkt punkt_tab
+python -m uvicorn ragent_lab.api.app:app --app-dir src --reload --port 8000
 ```
 
-### 本地运行
+另开终端：
 
 ```bash
-# 方式1：使用统一入口（推荐）
-python main.py web      # 启动Web界面
-python main.py cli      # 运行命令行演示
+cd frontend
+npm ci
+npm run dev
 ```
 
-### 编程使用
+打开 http://127.0.0.1:5173。Vite 将 `/api` 代理到后端。API 文档位于 http://127.0.0.1:8000/docs。
 
-#### 文本分块
-```python
-from ragent_lab.chunking import fixed_length_chunking, semantic_chunking
-from ragent_lab.config.settings import DEFAULT_TEXT
-
-# 使用固定长度分块
-chunks = fixed_length_chunking(DEFAULT_TEXT, chunk_size=100)
-
-# 使用语义分块
-semantic_chunks = semantic_chunking(DEFAULT_TEXT, threshold=0.85)
-```
-
-#### 嵌入模型
-```python
-from ragent_lab.embedding import (
-    sentence_transformer_embedding,
-    openai_embedding,
-    get_all_models
-)
-
-# 使用 SentenceTransformer (默认使用BGE-M3)
-texts = ["Hello world", "你好世界"]
-result = sentence_transformer_embedding(texts)
-print(f"向量维度: {result.dimension}")
-
-# 使用指定的模型
-result = sentence_transformer_embedding(texts, "intfloat/multilingual-e5-large")
-
-# 使用 OpenAI (需要 API Key)
-result = openai_embedding(texts, api_key="your-api-key")
-
-# 获取所有可用模型
-models = get_all_models()
-for name, info in models.items():
-    print(f"{name}: {info['desc']}")
-```
-
-## Docker 部署
-
-### 使用 Docker Compose（推荐）
+基础 API 无需安装 PyTorch。需要本地语义分块或本地 Embedding 时，再安装 CPU/GPU 对应的 PyTorch 和 `requirements-models.txt`：
 
 ```bash
-# 在 docker 目录下运行
-cd docker
-docker-compose up -d
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements-models.txt
 ```
 
-### 手动 Docker 构建
+生产 API 镜像已包含 CPU 推理依赖。模型首次调用时下载并缓存；E5 Mistral 7B 和 GME 默认禁用，需要额外算力并设置 `ENABLE_HEAVY_MODELS=true`。当前 GME 接口仅用于文本嵌入。
+
+## 测试
 
 ```bash
-# 构建镜像
-docker build -t rag-lab -f docker/Dockerfile .
-
-# 运行容器（后台，端口8501）
-docker run -d -p 8501:8501 --name rag-lab rag-lab
+python -m unittest discover -s tests -v
+cd frontend
+npm test
+npm run build
+npx playwright install chromium
+npm run test:e2e
 ```
 
-## 贡献
+端到端测试会启动 React 和 API；分块测试使用真实后端，Embedding UI 使用固定的服务响应，不调用付费接口。
 
-欢迎提交Issue和Pull Request来改进这个项目。
+## Docker
 
-## 许可证
+```bash
+docker compose -f docker/docker-compose.yml up -d --build --wait
+```
 
-MIT License
+前端监听 `127.0.0.1:8501`，通过 `/api` 转发至独立 API 容器。向量模型缓存在 Docker volume 中。默认仅允许浏览器提交用户自己的 API Key，不向前端提供服务器密钥。
+
+可选 `.env` 设置见 [env.example](env.example)。`ALLOW_SERVER_API_KEYS=true` 会允许客户端使用服务器额度，只应在可信访问环境开启；默认关闭。应用不提供账号系统。
+
+## GitHub Actions CI/CD
+
+配置文件：[.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml)。
+
+- PR、`dev` 和 `feat/**`：API 单元测试、前端单元测试、TypeScript 检查、构建、浏览器测试。
+- `master`：检查通过后构建两个 GHCR 镜像，以提交 SHA 标记，SSH 发布到服务器。
+- 部署目录：`/opt/rag-lab/releases/<sha>`；成功后更新 `current` 链接。
+- 部署会先拉取镜像，再更新容器；校验前端代理和 API 提交版本。失败恢复上一版本；首次迁移失败会重启旧 `rag-lab` 容器。
+- 服务器现有 Nginx 继续将 `lab.ragents.net` 转发到 `127.0.0.1:8501`。无需修改其他应用的容器或网络。
+
+仓库 Secrets：
+
+| 名称 | 内容 |
+| --- | --- |
+| `DEPLOY_SSH_KEY` | 此仓库专用的服务器 SSH 私钥 |
+| `DEPLOY_KNOWN_HOSTS` | 已核对的 `209.209.40.180` SSH host key |
+
+Actions 使用内置 `GITHUB_TOKEN` 发布和拉取 GHCR 镜像。服务器需要 Docker Compose v2.30+、curl、flock、tar；首次迁移保留 `/opt/rag-lab/.env` 和旧容器，部署有短暂重启窗口。
+
+手工回滚：
+
+```bash
+cd /opt/rag-lab/releases/<previous-sha>
+LAB_SKIP_PULL=true bash deploy/deploy.sh <previous-sha>
+```
+
+## 增加实验
+
+1. 在 `src/ragent_lab/api/catalog.py` 注册实验 ID、名称、状态和说明。
+2. 在 API 下增加独立路由/服务，并在 `api/app.py` 注册。
+3. 在 `frontend/src/pages` 添加页面，在 `App.tsx` 中绑定对应 ID。
+4. 实验未实现前使用 `planned` 状态，展示规划而非模拟执行结果。
+
+模型使用 `embedding/registry.py` 注册；分块策略使用 `chunking/registry.py` 注册。
+
+旧 Streamlit 文件保留用于迁移参考，不参与生产构建或运行。其依赖仍见 `requirements.txt`。
