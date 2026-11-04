@@ -1,10 +1,38 @@
 # Ragent Lab
 
-React + FastAPI 的中文 AI 实验工作台，部署于 https://lab.ragents.net。
+中文 AI 实验工作台：把 RAG 和多模态里的每个环节拆开来调参、对比、验证。
 
-- **文本分块**：11 种策略、参数调整、分块预览和长度统计。
-- **Embedding 对比**：7 个模型注册项、查询相似度排名、固定候选文本与查询的模型对比。
-- **图像理解**：工程图纸方向的独立规划页面，预留实验注册入口；尚未实现图片上传与推理。
+**在线体验：<https://lab.ragents.net>**
+
+![Ragent Lab 首页](docs/images/home.png)
+
+## 实验
+
+| 实验 | 状态 | 内容 |
+| --- | --- | --- |
+| 文本分块 | 可用 | 11 种分块策略，参数可调，提供分块预览和长度统计 |
+| Embedding 对比 | 可用 | 7 个向量模型；按查询相似度排名，用同一组候选文本对比各模型 |
+| 图像理解 | 规划中 | 面向工程图纸的视觉理解与信息提取；目前只有规划页，还不能上传图片或推理 |
+
+## 技术栈
+
+- **前端**：React 19 + TypeScript + Vite，Vitest 单元测试，Playwright 端到端测试
+- **后端**：FastAPI（Python 3.12），分块与 Embedding 各有策略注册表，本地模型按需加载
+- **部署**：前后端各一个 Docker 镜像，由 GitHub Actions 构建并推送到 GHCR，再通过 SSH 按提交版本发布
+
+架构和 API 说明见 [docs/architecture.md](docs/architecture.md)。
+
+## 目录结构
+
+```text
+frontend/              React 前端（pages/ 下每个实验一个页面）
+src/ragent_lab/api/    FastAPI 路由、schema、实验目录
+src/ragent_lab/chunking/   分块策略与注册表
+src/ragent_lab/embedding/  Embedding 模型与注册表
+docker/                前后端镜像与 compose 配置
+deploy/                服务器发布与回滚脚本
+tests/                 后端单元测试
+```
 
 ## 本地开发
 
