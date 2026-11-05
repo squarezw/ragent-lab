@@ -11,3 +11,5 @@ socksio>=1,<2
 langchain-text-splitters>=0.3,<2
 pillow>=11,<13
 pypdfium2>=4.30,<6
+ezdxf>=1.4,<2
+matplotlib>=3.9,<4
