@@ -14,3 +14,4 @@ frontend/test-results/
 .coverage
 .playwright-mcp/
 *.tsbuildinfo
+.superpowers/
