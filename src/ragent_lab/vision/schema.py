@@ -247,7 +247,8 @@ def model_json_schema_for(cls) -> dict:
                 merged = inline(copy.deepcopy(defs[name]), seen + (name,))
                 extra = {k: inline(v, seen) for k, v in node.items() if k != '$ref'}
                 return {**merged, **extra}
-            return {k: inline(v, seen) for k, v in node.items()}
+            return {k: inline(v, seen) for k, v in node.items()
+                    if not (k == 'discriminator' and isinstance(v, dict) and 'propertyName' in v)}
         if isinstance(node, list):
             return [inline(v, seen) for v in node]
         return node

@@ -85,7 +85,9 @@ class GeometryTests(unittest.TestCase):
     def test_json_schema_has_no_refs(self):
         for cls in (Understanding, Geometry):
             with self.subTest(cls.__name__):
-                self.assertNotIn('$ref', json.dumps(model_json_schema_for(cls)))
+                dumped = json.dumps(model_json_schema_for(cls))
+                self.assertNotIn('$ref', dumped)
+                self.assertNotIn('#/$defs', dumped)
 
 
 if __name__ == '__main__':
