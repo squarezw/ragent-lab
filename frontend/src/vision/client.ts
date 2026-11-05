@@ -5,6 +5,7 @@ import type {
 
 export const JOB_GONE = "任务已失效，请重新运行。";
 const NETWORK_ERROR = "连接中断或请求超时，请检查网络后重试。";
+const TOO_LARGE = "文件超过 15 MB，请压缩后重试。";
 const UNAVAILABLE = "服务暂时不可用，请稍后重试。";
 
 async function detailOf(response: Response): Promise<string> {
@@ -28,7 +29,11 @@ export async function uploadImage(file: File): Promise<UploadedImage> {
   } catch {
     throw new Error(NETWORK_ERROR);
   }
-  if (!response.ok) throw new Error(await detailOf(response));
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    if (typeof data?.detail === "string") throw new Error(data.detail);
+    throw new Error(response.status === 413 ? TOO_LARGE : UNAVAILABLE);
+  }
   return (await response.json()) as UploadedImage;
 }
 
@@ -54,26 +59,54 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+const MAX_POLL_RETRIES = 3;
+const POLL_TIMEOUT_MS = 30000;
+const abortError = () => new DOMException("Aborted", "AbortError");
+
 export async function pollJob<T>(
   id: string,
   { signal, intervalMs = 2000 }: { signal?: AbortSignal; intervalMs?: number } = {},
 ): Promise<T> {
+  let failures = 0;
   for (;;) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    let response: Response;
+    if (signal?.aborted) throw abortError();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), POLL_TIMEOUT_MS);
+    const forward = () => ctrl.abort();
+    signal?.addEventListener("abort", forward, { once: true });
+    let status = 0;
+    let data: unknown = null;
+    let transient = false;
     try {
-      response = await fetch(`/api/vision/jobs/${encodeURIComponent(id)}`, {
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
+      const response = await fetch(`/api/vision/jobs/${encodeURIComponent(id)}`, {
+        signal: ctrl.signal,
       });
-    } catch (err) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      throw new Error(NETWORK_ERROR);
+      status = response.status;
+      data = await response.json().catch((err) => {
+        if (ctrl.signal.aborted) throw err;
+        return null;
+      });
+    } catch {
+      transient = true;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", forward);
     }
-    if (response.status === 404) throw new Error(JOB_GONE);
-    if (!response.ok) throw new Error(await detailOf(response));
-    const job = (await response.json()) as Job<T>;
-    if (job.status === "done") return job.result as T;
-    if (job.status === "failed") throw new Error(job.error ?? UNAVAILABLE);
+    if (signal?.aborted) throw abortError();
+    if (transient) {
+      failures += 1;
+      if (failures > MAX_POLL_RETRIES) throw new Error(NETWORK_ERROR);
+      await sleep(intervalMs, signal);
+      continue;
+    }
+    failures = 0;
+    if (status === 404) throw new Error(JOB_GONE);
+    const body = data as (Job<T> & { detail?: unknown }) | null;
+    if (status < 200 || status >= 300)
+      throw new Error(typeof body?.detail === "string" ? body.detail : UNAVAILABLE);
+    if (!body) throw new Error(UNAVAILABLE);
+    if (body.status === "done") return body.result as T;
+    if (body.status === "failed") throw new Error(body.error ?? UNAVAILABLE);
     await sleep(intervalMs, signal);
   }
 }

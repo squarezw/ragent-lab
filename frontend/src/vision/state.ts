@@ -109,6 +109,7 @@ export function reducer(state: VisionState, action: Action): VisionState {
 }
 
 export const EXPORT_VERSION = 1;
+const INTERRUPTED = "导入时任务未完成，请重新运行。";
 const BAD_FILE = "导入文件格式不正确";
 
 export function exportState(s: VisionState): string {
@@ -137,14 +138,28 @@ export function importState(text: string): VisionState {
     !data.generations.every((g) => isObj(g) && typeof g.id === "string")
   )
     throw new Error(BAD_FILE);
+  const pending = (v: unknown) => v === "queued" || v === "running";
+  const runs: VisionState["runs"] = {};
+  for (const [k, r] of Object.entries(data.runs as Record<string, RunEntry>)) {
+    let e = r;
+    if (pending(e.status)) e = { ...e, status: "failed", error: INTERRUPTED };
+    if (pending(e.scoreStatus)) e = { ...e, scoreStatus: "failed", scoreError: INTERRUPTED };
+    runs[k] = e;
+  }
+  let consensus = isObj(data.consensus) ? (data.consensus as ConsensusEntry) : undefined;
+  if (consensus && pending(consensus.status))
+    consensus = { ...consensus, status: "failed", error: INTERRUPTED };
+  const generations = (data.generations as GenerationEntry[]).map((g) =>
+    pending(g.status) ? { ...g, status: "failed" as const, error: INTERRUPTED } : g,
+  );
   return {
     step: 2,
     image: image as ImageRef | null,
     imageName: data.imageName,
     scorable: data.scorable,
-    runs: data.runs as VisionState["runs"],
-    consensus: isObj(data.consensus) ? (data.consensus as ConsensusEntry) : undefined,
-    generations: data.generations as GenerationEntry[],
+    runs,
+    consensus,
+    generations,
   };
 }
 

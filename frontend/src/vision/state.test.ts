@@ -10,7 +10,7 @@ const populated: VisionState = {
   scorable: true,
   runs: { "m/x": { model: "m/x", model_name: "X", status: "failed", error: "超时" } },
   consensus: { status: "idle" },
-  generations: [{ id: "g1", sourceModel: "m/x", generator: "m/y", status: "queued" }],
+  generations: [{ id: "g1", sourceModel: "m/x", generator: "m/y", status: "done" }],
 };
 
 describe("vision state", () => {
@@ -38,6 +38,22 @@ describe("vision state", () => {
     expect(() => importState(bad)).toThrow("导入文件格式不正确");
     expect(() => importState("not json")).toThrow("导入文件格式不正确");
     expect(() => importState(JSON.stringify({ version: 1 }))).toThrow("导入文件格式不正确");
+  });
+
+  it("importState turns unfinished work into failed", () => {
+    const busy: VisionState = {
+      ...populated,
+      runs: { m: { model: "m", model_name: "M", status: "running", scoreStatus: "running" },
+              q: { model: "q", model_name: "Q", status: "queued" } },
+      consensus: { status: "running" },
+      generations: [{ id: "g", sourceModel: "m", generator: "m", status: "queued" }],
+    };
+    const back = importState(exportState(busy));
+    const msg = "导入时任务未完成，请重新运行。";
+    expect(back.runs.m).toMatchObject({ status: "failed", error: msg, scoreStatus: "failed", scoreError: msg });
+    expect(back.runs.q).toMatchObject({ status: "failed", error: msg });
+    expect(back.consensus).toMatchObject({ status: "failed", error: msg });
+    expect(back.generations[0]).toMatchObject({ status: "failed", error: msg });
   });
 
   it("runUpdate creates then merges entries", () => {
