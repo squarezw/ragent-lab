@@ -56,7 +56,7 @@ class OpenRouterTests(unittest.TestCase):
         body = json.loads(req.content)
         self.assertEqual(req.headers['Authorization'], 'Bearer sk-test')
         self.assertEqual(req.headers['X-Title'], 'Ragent Lab')
-        self.assertIs(body['response_format']['json_schema']['strict'], True)
+        self.assertIs(body['response_format']['json_schema']['strict'], False)
         self.assertTrue(body['usage']['include'])
         self.assertNotIn('provider', body)
         run_call(handler, JUDGE_MODEL)

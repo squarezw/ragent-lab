@@ -95,9 +95,11 @@ def _body(model: dict, messages: list[dict], schema_name: str, schema: dict) -> 
         body['provider'] = model['provider']
     fmt = model.get('response_format')
     if fmt == 'json_schema':
+        # strict=False: Pydantic schemas lack additionalProperties:false / all-required,
+        # which strict providers reject with HTTP 400.
         body['response_format'] = {
             'type': 'json_schema',
-            'json_schema': {'name': schema_name, 'strict': True, 'schema': schema},
+            'json_schema': {'name': schema_name, 'strict': False, 'schema': schema},
         }
     elif fmt == 'json_object':
         body['response_format'] = {'type': 'json_object'}

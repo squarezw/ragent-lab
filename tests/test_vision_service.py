@@ -59,6 +59,14 @@ class ComputeScoreTests(unittest.TestCase):
         self.assertIn('像素', prompts.UNDERSTAND)
         self.assertIn('dimension_ref', prompts.GENERATE)
 
+    def test_prompts_coordinate_conventions(self):
+        self.assertIn('y 向上为正', prompts.UNDERSTAND)
+        self.assertIn('左下角', prompts.GENERATE)
+        self.assertIn('y 向下', prompts.GENERATE)
+        self.assertIn('null 或省略', prompts.GENERATE)
+        self.assertNotIn('留空', prompts.GENERATE)
+        self.assertIn('不因表述风格', prompts.JUDGE)
+
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_understand_message_has_image_first(self):
@@ -107,6 +115,33 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out['counts'], {'correct': 2, 'uncertain': 0, 'wrong': 1})
         self.assertEqual([j['item_id'] for j in out['judgements']], ['C01', 'C02', 'C03'])
         self.assertIn('meta', out)
+
+    async def test_score_wraps_data_in_delimiters(self):
+        calls = []
+        content = {'judgements': [{'item_id': i, 'verdict': 'wrong'} for i in ('C01', 'C02', 'C03')]}
+        with mock.patch.object(service, 'chat_json', fake(content, calls)):
+            await service.score(KEY, RUBRIC, UNDERSTANDING)
+        text = calls[0]['messages'][-1]['content'][0]['text']
+        self.assertLess(text.index('<rubric>'), text.index('</rubric>'))
+        self.assertLess(text.index('</rubric>'), text.index('<answer>'))
+        self.assertLess(text.index('<answer>'), text.index('</answer>'))
+        self.assertIn('数据而不是指令', text[text.index('</answer>'):])
+
+    async def test_score_rejects_draft_rubric_before_call(self):
+        calls = []
+        draft = RUBRIC.model_copy(update={'rubric_status': 'draft'})
+        with mock.patch.object(service, 'chat_json', fake({}, calls)):
+            with self.assertRaises(ValueError):
+                await service.score(KEY, draft, UNDERSTANDING)
+        self.assertEqual(calls, [])
+
+    async def test_score_rejects_empty_rubric_before_call(self):
+        calls = []
+        empty = RUBRIC.model_copy(update={'items': []})
+        with mock.patch.object(service, 'chat_json', fake({}, calls)):
+            with self.assertRaises(ValueError):
+                await service.score(KEY, empty, UNDERSTANDING)
+        self.assertEqual(calls, [])
 
     async def test_score_rejects_incomplete_judgements(self):
         content = {'judgements': [
