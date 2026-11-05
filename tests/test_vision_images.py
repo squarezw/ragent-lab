@@ -3,6 +3,7 @@ import io
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +24,14 @@ def _pdf(pages):
     doc = pdfium.PdfDocument.new()
     for _ in range(pages):
         doc.new_page(200, 100)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _pdf_size(w, h):
+    doc = pdfium.PdfDocument.new()
+    doc.new_page(w, h)
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
@@ -61,6 +70,21 @@ class ImagePrepTests(unittest.TestCase):
             vi.prepare_image(b'0' * (15 * 1024 * 1024 + 1), 'big.png')
         ok = vi.prepare_image(_enc(Image.new('RGB', (20, 20), 'blue'), 'JPEG'), 'fake.png')
         self.assertEqual((ok.width, ok.height), (20, 20))
+
+
+class LimitTests(unittest.TestCase):
+    def test_huge_pdf_page_is_bounded(self):
+        start = time.monotonic()
+        d = vi.prepare_image(_pdf_size(14000, 14000), 'huge.pdf')
+        self.assertLessEqual(max(d.width, d.height), 2048)
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_oversized_raster_rejected(self):
+        data = _enc(Image.new('RGB', (100, 100), 'white'), 'PNG')
+        with patch.object(vi, 'MAX_PIXELS', 5000):
+            with self.assertRaises(vi.ImageRejected) as cm:
+                vi.prepare_image(data, 'big.png')
+        self.assertIn('过大', str(cm.exception))
 
 
 class StoreTests(unittest.TestCase):

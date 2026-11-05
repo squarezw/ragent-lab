@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import uuid
+import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ log = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 MAX_EDGE = 2048
+MAX_PIXELS = 50_000_000
 PDF_DPI = 200
 STORE_TTL_SECONDS = 7200
 STORE_MAX_ITEMS = 100
@@ -47,7 +49,11 @@ def _render_pdf(data: bytes) -> Image.Image:
             if len(doc) != 1:
                 raise ImageRejected('仅支持单页 PDF')
             page = doc[0]
-            return page.render(scale=PDF_DPI / 72).to_pil()
+            w_pt, h_pt = page.get_size()
+            if w_pt <= 0 or h_pt <= 0:
+                raise ImageRejected('PDF 页面尺寸无效')
+            scale = min(PDF_DPI / 72, MAX_EDGE / max(w_pt, h_pt))
+            return page.render(scale=scale).to_pil()
         finally:
             doc.close()
     except ImageRejected:
@@ -58,10 +64,16 @@ def _render_pdf(data: bytes) -> Image.Image:
 
 def _decode_raster(data: bytes) -> Image.Image:
     try:
-        img = Image.open(io.BytesIO(data))
-        if img.format not in ('PNG', 'JPEG'):
-            raise ImageRejected('仅支持 PNG、JPG 或单页 PDF')
-        img.load()
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', Image.DecompressionBombWarning)
+            img = Image.open(io.BytesIO(data))
+            if img.format not in ('PNG', 'JPEG'):
+                raise ImageRejected('仅支持 PNG、JPG 或单页 PDF')
+            if img.width * img.height > MAX_PIXELS:
+                raise ImageRejected('图片尺寸过大')
+            if img.format == 'JPEG':
+                img.draft('RGB', (MAX_EDGE, MAX_EDGE))
+            img.load()
         return img
     except ImageRejected:
         raise
