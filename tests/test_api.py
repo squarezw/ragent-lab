@@ -18,7 +18,7 @@ class APITests(unittest.TestCase):
     def test_catalogs_are_serializable_and_have_vision_placeholder(self):
         self.assertEqual(self.client.get('/api/health').status_code, 200)
         catalog = self.client.get('/api/experiments').json()
-        self.assertEqual(next(x for x in catalog if x['id'] == 'vision')['status'], 'planned')
+        self.assertEqual(next(x for x in catalog if x['id'] == 'vision')['status'], 'ready')
         self.assertEqual(len(self.client.get('/api/chunking/strategies').json()), 11)
         self.assertEqual(len(self.client.get('/api/embedding/models').json()), 7)
 

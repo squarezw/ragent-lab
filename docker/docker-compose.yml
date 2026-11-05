@@ -11,6 +11,9 @@ services:
         required: false
     volumes:
       - model-cache:/cache/huggingface
+      - ${LAB_VISION_SAMPLES:-/opt/rag-lab/vision-samples}:/samples:ro
+    environment:
+      VISION_SAMPLES_DIR: /samples
     mem_limit: 5g
     cpus: 2.0
     networks: [lab]

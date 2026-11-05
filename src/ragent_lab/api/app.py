@@ -4,12 +4,14 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from . import vision
 from .catalog import EXPERIMENTS
 from .schemas import ChunkRequest, EmbeddingRequest
 from .services import chunk_text, embed_texts, model_catalog, strategy_catalog
 
 load_dotenv()
 app = FastAPI(title='Ragent Lab API', version='2.0.0')
+app.include_router(vision.router)
 
 
 @app.exception_handler(RequestValidationError)

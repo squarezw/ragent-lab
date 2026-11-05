@@ -13,3 +13,4 @@ pillow>=11,<13
 pypdfium2>=4.30,<6
 ezdxf>=1.4,<2
 matplotlib>=3.9,<4
+python-multipart>=0.0.20,<1

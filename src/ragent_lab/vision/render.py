@@ -22,8 +22,6 @@ CJK_FONT = 'NotoSansCJK-Regular.ttc'
 _CJK_FALLBACK_FONTS = ('NotoSansCJKsc-Regular.otf', 'NotoSansCJK-Regular.otf',
                        'Hiragino Sans GB.ttc', 'PingFang.ttc', 'STHeiti Light.ttc',
                        'wqy-microhei.ttc', 'msyh.ttc', 'simhei.ttf')
-_MPL_FONT_FAMILY = ['Noto Sans CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Heiti SC',
-                    'WenQuanYi Micro Hei', 'Microsoft YaHei', 'DejaVu Sans']
 
 # name -> (ACI color, linetype, lineweight in 1/100 mm)
 _LAYERS = {
@@ -194,23 +192,22 @@ def to_svg(doc: Drawing, sheet: Sheet | None = None) -> str:
 
 def to_pdf(doc: Drawing, sheet: Sheet) -> bytes:
     """PDF via matplotlib, page size = sheet size in mm, 1 drawing unit = 1 mm."""
-    import matplotlib
     from matplotlib.figure import Figure
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     _ensure_cjk_font()
     width, height = sheet.width, sheet.height
-    with matplotlib.rc_context({'font.family': _MPL_FONT_FAMILY, 'pdf.fonttype': 42}):
-        fig = Figure(figsize=(width / 25.4, height / 25.4))
-        ax = fig.add_axes((0, 0, 1, 1))
-        backend = MatplotlibBackend(ax, adjust_figure=False)
-        _draw(doc, backend)
-        ax.set_xlim(0, width)
-        ax.set_ylim(0, height)
-        ax.set_aspect('equal', adjustable='box')
-        ax.set_axis_off()
-        buf = io.BytesIO()
-        fig.savefig(buf, format='pdf')
+    # Text is drawn as paths by ezdxf, so no rcParams (global, thread-unsafe) are touched.
+    fig = Figure(figsize=(width / 25.4, height / 25.4))
+    ax = fig.add_axes((0, 0, 1, 1))
+    backend = MatplotlibBackend(ax, adjust_figure=False)
+    _draw(doc, backend)
+    ax.set_xlim(0, width)
+    ax.set_ylim(0, height)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_axis_off()
+    buf = io.BytesIO()
+    fig.savefig(buf, format='pdf')
     return buf.getvalue()
 
 
