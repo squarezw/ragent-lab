@@ -84,6 +84,14 @@ class Understanding(_Base):
 
 # ---- Geometry ------------------------------------------------------------
 
+MAX_POLY_POINTS = 2000
+MAX_TEXT_CHARS = 200
+MAX_TEXT_HEIGHT = 1000
+MAX_DIM_TEXT_CHARS = 100
+MAX_TOTAL_VERTICES = 50_000
+MAX_TOTAL_TEXT_CHARS = 20_000
+
+
 def _check_point(p: list[float]) -> list[float]:
     if len(p) not in (2, 3):
         raise ValueError('point must have 2 (x, y) or 3 (x, y, bulge) values')
@@ -139,15 +147,15 @@ class ArcE(_Entity):
 
 class PolylineE(_Entity):
     type: Literal['polyline']
-    points: Annotated[list[BulgePoint], Field(min_length=2)]
+    points: Annotated[list[BulgePoint], Field(min_length=2, max_length=MAX_POLY_POINTS)]
     closed: bool = False
 
 
 class TextE(_Entity):
     type: Literal['text']
     insert: Point
-    height: Annotated[float, Field(gt=0, allow_inf_nan=False)]
-    content: str
+    height: Annotated[float, Field(gt=0, le=MAX_TEXT_HEIGHT, allow_inf_nan=False)]
+    content: Annotated[str, Field(max_length=MAX_TEXT_CHARS)]
     rotation: Angle = 0
 
 
@@ -159,7 +167,7 @@ class DimensionE(_Entity):
     p2: Point
     location: Point
     angle: Angle = 0
-    text: str | None = None
+    text: Annotated[str | None, Field(max_length=MAX_DIM_TEXT_CHARS)] = None
 
 
 Entity = Annotated[
@@ -177,6 +185,26 @@ class Geometry(BaseModel):
     units: Literal['mm']
     sheet: Sheet
     entities: Annotated[list[Entity], Field(max_length=MAX_ENTITIES)]
+
+    @model_validator(mode='after')
+    def _budget(self):
+        vertices = chars = 0
+        for e in self.entities:
+            if isinstance(e, PolylineE):
+                vertices += len(e.points)
+            elif isinstance(e, (LineE, DimensionE)):
+                vertices += 2
+            else:
+                vertices += 1
+            if isinstance(e, TextE):
+                chars += len(e.content)
+            elif isinstance(e, DimensionE):
+                chars += len(e.text or '')
+        if vertices > MAX_TOTAL_VERTICES:
+            raise ValueError(f'geometry exceeds {MAX_TOTAL_VERTICES} vertices')
+        if chars > MAX_TOTAL_TEXT_CHARS:
+            raise ValueError(f'geometry exceeds {MAX_TOTAL_TEXT_CHARS} text characters')
+        return self
 
 
 # ---- Rubric / judgement / consensus -------------------------------------

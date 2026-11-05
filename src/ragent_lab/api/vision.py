@@ -1,6 +1,7 @@
 """Vision HTTP API: jobs run in memory; the API key lives only inside job closures."""
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Literal
 from urllib.parse import quote
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from ..vision import render, service
 from ..vision.images import (MAX_UPLOAD_BYTES, ImageRejected, PreparedImage, get_sample,
                              images, load_samples, prepare_image)
+from ..vision.openrouter import OpenRouterError
 from ..vision.jobs import public, runner
 from ..vision.registry import JUDGE_MODEL, VISION_MODELS, get_model, model_prices
 from ..vision.schema import Geometry, Understanding
@@ -194,9 +196,40 @@ async def generate(body: GenerateBody):
     async def factory():
         out = await service.generate(key, model_id, image, understanding.model_dump())
         geometry = Geometry.model_validate(out['geometry'])
-        rendered = await run_in_threadpool(render.render_all, geometry, understanding)
+        try:
+            rendered = await bounded_render(render.render_all, geometry, understanding)
+        except RenderBusy:
+            raise OpenRouterError('timeout', RENDER_BUSY) from None
         return {'geometry': out['geometry'], **rendered, 'meta': out['meta']}
     return _job('generate', get_model(model_id)['name'], factory)
+
+
+RENDER_BUSY = '导出繁忙或超时，请稍后重试。'
+RENDER_BUDGET = 60.0
+RENDER_CONCURRENCY = 2
+_render_sems: dict = {}
+
+
+class RenderBusy(Exception):
+    pass
+
+
+async def bounded_render(fn, *args):
+    """Run a CPU-bound render in a thread, at most 2 at once, within a wall-clock budget.
+
+    The slot is held until the thread really finishes, even after a timeout."""
+    loop = asyncio.get_running_loop()
+    sem = _render_sems.setdefault(loop, asyncio.Semaphore(RENDER_CONCURRENCY))
+    try:
+        await asyncio.wait_for(sem.acquire(), RENDER_BUDGET)
+    except asyncio.TimeoutError:
+        raise RenderBusy from None
+    task = asyncio.ensure_future(run_in_threadpool(fn, *args))
+    task.add_done_callback(lambda t: (sem.release(), t.cancelled() or t.exception()))
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), RENDER_BUDGET)
+    except asyncio.TimeoutError:
+        raise RenderBusy from None
 
 
 def _render_export(geometry: Geometry, fmt: str) -> bytes:
@@ -206,7 +239,10 @@ def _render_export(geometry: Geometry, fmt: str) -> bytes:
 
 @router.post('/export')
 async def export(body: ExportBody):
-    data = await run_in_threadpool(_render_export, body.geometry, body.format)
+    try:
+        data = await bounded_render(_render_export, body.geometry, body.format)
+    except RenderBusy:
+        raise HTTPException(503, RENDER_BUSY) from None
     stem = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', body.filename.strip()).strip('. ')
     stem = re.sub(r'\.(pdf|dxf)$', '', stem, flags=re.I) or 'drawing'
     name = f'{stem}.{body.format}'

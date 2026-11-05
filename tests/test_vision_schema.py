@@ -64,6 +64,26 @@ class GeometryTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             Geometry.model_validate(geom([line()], units='inch'))
 
+    def test_geometry_cost_budgets(self):
+        def text(n, h=5):
+            return {'type': 'text', 'layer': 'TEXT', 'insert': [0, 0], 'height': h, 'content': 'x' * n}
+        poly = lambda n: {'type': 'polyline', 'layer': 'OUTLINE', 'points': [[i % 100, 0] for i in range(n)]}
+        cases = {
+            'text 201 chars': [text(201)],
+            'text height 1001': [text(5, 1001)],
+            'dim text 101': [{'type': 'dimension', 'layer': 'DIM', 'dimtype': 'linear', 'p1': [0, 0],
+                              'p2': [1, 0], 'location': [0, 1], 'text': 'x' * 101}],
+            'polyline 2001 points': [poly(2001)],
+            'vertices 50001': [poly(2000) for _ in range(25)] + [line()],
+            'text chars 20001': [text(200) for _ in range(100)] + [text(1)],
+        }
+        for name, ents in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ValidationError):
+                    Geometry.model_validate(geom(ents))
+        Geometry.model_validate(geom([text(200, 1000), poly(2000)]))
+        Geometry.model_validate(geom([poly(2000) for _ in range(25)]))
+
     def test_geometry_accepts_all_entity_types(self):
         ents = [
             line(dimension_ref='d1'),

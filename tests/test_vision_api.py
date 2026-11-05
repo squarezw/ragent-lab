@@ -187,6 +187,24 @@ class VisionAPITests(unittest.TestCase):
             self.assertIn('.dxf', r.headers['content-disposition'])
             self.assertIn(b'SECTION', r.content)
 
+    def test_export_rejects_over_budget_geometry(self):
+        text = {'type': 'text', 'layer': 'TEXT', 'insert': [0, 0], 'height': 5}
+        poly = {'type': 'polyline', 'layer': 'OUTLINE', 'points': [[i % 100, 0] for i in range(2000)]}
+        cases = {
+            'long text': [{**text, 'content': 'x' * 201}],
+            'huge text height': [{**text, 'content': 'a', 'height': 1001}],
+            'polyline points': [{**poly, 'points': poly['points'] + [[0, 0]]}],
+            'total vertices': [poly] * 26,
+            'total chars': [{**text, 'content': 'x' * 200}] * 101,
+        }
+        with TestClient(app) as client:
+            for name, ents in cases.items():
+                with self.subTest(name):
+                    geometry = {**GEOMETRY, 'entities': ents}
+                    r = client.post('/api/vision/export', json={
+                        'geometry': geometry, 'format': 'dxf', 'filename': 'a'})
+                    self.assertEqual(r.status_code, 422)
+
     def test_expired_job_and_image_404(self):
         with TestClient(app) as client:
             r = client.get('/api/vision/jobs/deadbeef')
@@ -203,9 +221,55 @@ class VisionAPITests(unittest.TestCase):
         with TestClient(app) as client:
             r = client.post('/api/vision/images', files={
                 'file': ('big.png', b'0' * (16 * 1024 * 1024), 'image/png')})
-            self.assertIn(r.status_code, (413, 422))
+            self.assertEqual(r.status_code, 413)
             r = client.post('/api/vision/images', files={'file': ('x.png', b'not an image', 'image/png')})
             self.assertEqual(r.status_code, 422)
+
+
+class RenderBoundTests(unittest.TestCase):
+    def setUp(self):
+        from ragent_lab.api import vision as api_vision
+        self.api = api_vision
+
+    def test_concurrency_capped_at_two(self):
+        import asyncio
+        import threading
+        lock, state = threading.Lock(), {'now': 0, 'max': 0}
+
+        def work():
+            with lock:
+                state['now'] += 1
+                state['max'] = max(state['max'], state['now'])
+            time.sleep(0.15)
+            with lock:
+                state['now'] -= 1
+            return 1
+
+        async def main():
+            return await asyncio.gather(*(self.api.bounded_render(work) for _ in range(5)))
+        self.assertEqual(asyncio.run(main()), [1] * 5)
+        self.assertEqual(state['max'], 2)
+
+    def test_budget_exceeded_raises_busy_and_keeps_slot_until_done(self):
+        import asyncio
+        with patch.object(self.api, 'RENDER_BUDGET', 0.1):
+            async def main():
+                with self.assertRaises(self.api.RenderBusy):
+                    await self.api.bounded_render(time.sleep, 0.4)
+                with self.assertRaises(self.api.RenderBusy):
+                    await asyncio.gather(*(self.api.bounded_render(time.sleep, 0.4) for _ in range(3)))
+            asyncio.run(main())
+
+    def test_export_returns_503_when_busy(self):
+        def slow(*_a):
+            time.sleep(0.4)
+            return b''
+        with patch.object(self.api, 'RENDER_BUDGET', 0.1), \
+                patch.object(self.api, '_render_export', slow), TestClient(app) as client:
+            r = client.post('/api/vision/export', json={
+                'geometry': GEOMETRY, 'format': 'dxf', 'filename': 'a'})
+            self.assertEqual(r.status_code, 503)
+            self.assertIn('导出繁忙或超时，请稍后重试。', r.text)
 
 
 async def _fake_prices():
