@@ -197,7 +197,7 @@ async def generate(body: GenerateBody):
         out = await service.generate(key, model_id, image, understanding.model_dump())
         geometry = Geometry.model_validate(out['geometry'])
         try:
-            rendered = await bounded_render(render.render_all, geometry, understanding)
+            rendered = await bounded_render('generate', render.render_all, geometry, understanding)
         except RenderBusy:
             raise OpenRouterError('timeout', RENDER_BUSY) from None
         return {'geometry': out['geometry'], **rendered, 'meta': out['meta']}
@@ -214,12 +214,12 @@ class RenderBusy(Exception):
     pass
 
 
-async def bounded_render(fn, *args):
-    """Run a CPU-bound render in a thread, at most 2 at once, within a wall-clock budget.
+async def bounded_render(pool: str, fn, *args):
+    """Run a CPU-bound render in a thread, at most 2 at once per pool ('export' / 'generate'), within a wall-clock budget.
 
     The slot is held until the thread really finishes, even after a timeout."""
     loop = asyncio.get_running_loop()
-    sem = _render_sems.setdefault(loop, asyncio.Semaphore(RENDER_CONCURRENCY))
+    sem = _render_sems.setdefault((loop, pool), asyncio.Semaphore(RENDER_CONCURRENCY))
     try:
         await asyncio.wait_for(sem.acquire(), RENDER_BUDGET)
     except asyncio.TimeoutError:
@@ -240,7 +240,7 @@ def _render_export(geometry: Geometry, fmt: str) -> bytes:
 @router.post('/export')
 async def export(body: ExportBody):
     try:
-        data = await bounded_render(_render_export, body.geometry, body.format)
+        data = await bounded_render('export', _render_export, body.geometry, body.format)
     except RenderBusy:
         raise HTTPException(503, RENDER_BUSY) from None
     stem = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', body.filename.strip()).strip('. ')

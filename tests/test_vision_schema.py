@@ -84,6 +84,15 @@ class GeometryTests(unittest.TestCase):
         Geometry.model_validate(geom([text(200, 1000), poly(2000)]))
         Geometry.model_validate(geom([poly(2000) for _ in range(25)]))
 
+    def test_polyline_bulge_bounded(self):
+        def pl(b):
+            return {'type': 'polyline', 'layer': 'OUTLINE', 'points': [[0, 0, b], [10, 0]]}
+        for ok in (10, -10, 0.5):
+            Geometry.model_validate(geom([pl(ok)]))
+        for bad in (10.01, -11, float('inf'), float('nan')):
+            with self.subTest(bad), self.assertRaises(ValidationError):
+                Geometry.model_validate(geom([pl(bad)]))
+
     def test_geometry_accepts_all_entity_types(self):
         ents = [
             line(dimension_ref='d1'),

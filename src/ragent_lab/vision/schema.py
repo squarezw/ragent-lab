@@ -85,6 +85,7 @@ class Understanding(_Base):
 # ---- Geometry ------------------------------------------------------------
 
 MAX_POLY_POINTS = 2000
+MAX_BULGE = 10
 MAX_TEXT_CHARS = 200
 MAX_TEXT_HEIGHT = 1000
 MAX_DIM_TEXT_CHARS = 100
@@ -97,6 +98,8 @@ def _check_point(p: list[float]) -> list[float]:
         raise ValueError('point must have 2 (x, y) or 3 (x, y, bulge) values')
     if not all(math.isfinite(v) for v in p):
         raise ValueError('point values must be finite')
+    if len(p) == 3 and abs(p[2]) > MAX_BULGE:
+        raise ValueError(f'bulge magnitude exceeds {MAX_BULGE}')
     if any(abs(v) > MAX_COORD for v in p[:2]):
         raise ValueError(f'coordinate magnitude exceeds {MAX_COORD}')
     return p

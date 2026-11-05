@@ -246,7 +246,7 @@ class RenderBoundTests(unittest.TestCase):
             return 1
 
         async def main():
-            return await asyncio.gather(*(self.api.bounded_render(work) for _ in range(5)))
+            return await asyncio.gather(*(self.api.bounded_render('export', work) for _ in range(5)))
         self.assertEqual(asyncio.run(main()), [1] * 5)
         self.assertEqual(state['max'], 2)
 
@@ -255,10 +255,24 @@ class RenderBoundTests(unittest.TestCase):
         with patch.object(self.api, 'RENDER_BUDGET', 0.1):
             async def main():
                 with self.assertRaises(self.api.RenderBusy):
-                    await self.api.bounded_render(time.sleep, 0.4)
+                    await self.api.bounded_render('export', time.sleep, 0.4)
                 with self.assertRaises(self.api.RenderBusy):
-                    await asyncio.gather(*(self.api.bounded_render(time.sleep, 0.4) for _ in range(3)))
+                    await asyncio.gather(*(self.api.bounded_render('export', time.sleep, 0.4) for _ in range(3)))
             asyncio.run(main())
+
+    def test_export_pool_does_not_block_generate_pool(self):
+        import asyncio
+        with patch.object(self.api, 'RENDER_BUDGET', 0.3):
+            async def main():
+                hogs = [asyncio.ensure_future(self.api.bounded_render('export', time.sleep, 0.5))
+                        for _ in range(2)]
+                await asyncio.sleep(0.05)
+                got = await self.api.bounded_render('generate', lambda: 'ok')
+                with self.assertRaises(self.api.RenderBusy):
+                    await self.api.bounded_render('export', lambda: 'x')
+                await asyncio.gather(*hogs, return_exceptions=True)
+                return got
+            self.assertEqual(asyncio.run(main()), 'ok')
 
     def test_export_returns_503_when_busy(self):
         def slow(*_a):
