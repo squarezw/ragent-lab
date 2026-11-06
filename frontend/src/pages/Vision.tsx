@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ErrorMessage, PageHeader } from "../components/UI";
 import {
+  listBuiltin,
   listModels,
   listSamples,
   pollJob,
@@ -11,17 +12,16 @@ import {
 import {
   DEFAULT_JUDGE,
   exportState,
-  gatewayStorage,
   importState,
   initialState,
   judgeStorage,
-  keyStorage,
   reducer,
 } from "../vision/state";
 import {
-  GATEWAY_NAMES,
-  type Gateway,
-} from "../vision/types";
+  buildOptions,
+  useModelSettings,
+  type BuiltinInfo,
+} from "../vision/modelSettings";
 import type {
   ConsensusResult,
   GenerateResult,
@@ -36,9 +36,8 @@ import StepSelect from "../vision/StepSelect";
 import StepUnderstand from "../vision/StepUnderstand";
 import StepRedraw from "../vision/StepRedraw";
 
-const needKey = (g: Gateway) => `请先在第 ① 步填写 ${GATEWAY_NAMES[g]} Key。`;
-const servedBy = (m: VisionModel, g: Gateway) =>
-  (m.gateways ?? ["openrouter"]).includes(g);
+const NO_MODELS = "还没有可用的模型：请先到「模型设置」填写 Key、访问码，或添加模型。";
+const NOT_CONFIGURED = "这个模型已不在「模型设置」中启用，请先启用或改选其他模型。";
 const isAbort = (e: unknown) => (e as Error)?.name === "AbortError";
 const isImageGone = (e: unknown) =>
   ((e as Error)?.message ?? "").includes("图片已过期");
@@ -59,18 +58,10 @@ export default function Vision() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [models, setModels] = useState<VisionModel[]>([]);
   const [samples, setSamples] = useState<Sample[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [gateway, setGateway] = useState<Gateway>(() => gatewayStorage.load());
-  const [keys, setKeys] = useState<Record<Gateway, string>>(() => ({
-    openrouter: keyStorage.load("openrouter"),
-    kie: keyStorage.load("kie"),
-  }));
-  const [remembers, setRemembers] = useState<Record<Gateway, boolean>>(() => ({
-    openrouter: keyStorage.load("openrouter") !== "",
-    kie: keyStorage.load("kie") !== "",
-  }));
-  const apiKey = keys[gateway];
-  const remember = remembers[gateway];
+  // Models the visitor unticked; everything else that is ready starts selected.
+  const [deselected, setDeselected] = useState<string[]>([]);
+  const [settings] = useModelSettings();
+  const [builtin, setBuiltin] = useState<BuiltinInfo | null>(null);
   const [judgePick, setJudgePick] = useState(() => judgeStorage.load());
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -90,11 +81,11 @@ export default function Vision() {
   }, []);
   useEffect(() => {
     listModels()
-      .then((list) => {
-        setModels(list);
-        setSelected(list.filter((m) => servedBy(m, gateway)).map((m) => m.id));
-      })
+      .then(setModels)
       .catch((e) => setError(e.message));
+    listBuiltin()
+      .then(setBuiltin)
+      .catch(() => setBuiltin(null));
     listSamples()
       .then(setSamples)
       .catch((e) => setError(e.message));
@@ -105,35 +96,48 @@ export default function Vision() {
     ctrl.current = new AbortController();
     setActionError("");
   }
-  // Only the models the chosen gateway serves can be run, judged or used for redraw.
-  const available = models.filter((m) => servedBy(m, gateway));
-  function changeKey(key: string, keep = remember) {
-    setKeys((cur) => ({ ...cur, [gateway]: key }));
-    setRemembers((cur) => ({ ...cur, [gateway]: keep }));
-    keyStorage.save(key, keep, gateway);
-  }
-  function changeGateway(next: Gateway) {
-    setGateway(next);
-    gatewayStorage.save(next);
-    setSelected(models.filter((m) => servedBy(m, next)).map((m) => m.id));
-    setActionError("");
-  }
-  // A remembered judge may have left the registry: fall back to the default, then the first model.
+  // Everything the settings page enabled; only "ready" ones (key / code filled) can run.
+  const options = buildOptions(settings, models, builtin);
+  const usable = options.filter((o) => o.ready);
+  const pending = options.filter((o) => !o.ready);
+  // The step components take VisionModel-shaped entries; the option key is the id.
+  const available: VisionModel[] = usable.map((o) => ({
+    id: o.key,
+    name: o.name,
+    family: o.source,
+    notes: "",
+    params: { max_tokens: null, temperature: null, reasoning: null },
+    price: null,
+    priceLabel: `${o.badge} · ${o.priceLabel}`,
+  }));
+  const selected = available
+    .map((m) => m.id)
+    .filter((id) => !deselected.includes(id));
+  const refOf = (key: string) => options.find((o) => o.key === key)?.ref;
+  const access = { access_code: settings.accessCode };
+  // A remembered judge may no longer be usable: fall back to the default, then the first model.
   const listed = (id: string) => available.some((m) => m.id === id);
-  const judge =
-    !available.length || listed(judgePick)
-      ? judgePick
-      : listed(DEFAULT_JUDGE)
+  const judge = listed(judgePick)
+    ? judgePick
+    : listed(`catalog:${judgePick}`) // saved before the settings page existed
+      ? `catalog:${judgePick}`
+      : listed(DEFAULT_JUDGE) || !available.length
         ? DEFAULT_JUDGE
         : available[0].id;
   function changeJudge(model: string) {
     setJudgePick(model);
     judgeStorage.save(model);
   }
-  function requireKey(): boolean {
-    if (apiKey.trim()) return true;
-    setActionError(needKey(gateway));
+  function requireModels(): boolean {
+    if (usable.length) return true;
+    setActionError(NO_MODELS);
     return false;
+  }
+  // The request reference for a model key, or an error if it is not configured any more.
+  function refFor(key: string) {
+    const ref = refOf(key);
+    if (!ref || !usable.some((o) => o.key === key)) throw new Error(NOT_CONFIGURED);
+    return ref;
   }
 
   // Run a job that needs the drawing; if the server lost the upload, re-upload once and retry.
@@ -178,13 +182,7 @@ export default function Vision() {
     try {
       const result = await runJob<ScoreResult>(
         "score",
-        {
-          sample_id: image.id,
-          understanding,
-          judge_model: judge,
-          gateway,
-          api_key: apiKey,
-        },
+        { sample_id: image.id, understanding, judge: refFor(judge), ...access },
         signal,
       );
       if (!signal.aborted)
@@ -209,7 +207,7 @@ export default function Vision() {
     const scorable = state.scorable && image.kind === "sample";
     const signal = ctrl.current.signal;
     const name =
-      models.find((m) => m.id === model)?.name ??
+      options.find((o) => o.key === model)?.name ??
       state.runs[model]?.model_name ??
       model;
     dispatch({
@@ -230,7 +228,7 @@ export default function Vision() {
       const result = await withImage(image, (img) =>
         runJob<UnderstandResult>(
           "understand",
-          { image: img, model, gateway, api_key: apiKey },
+          { image: img, model: refFor(model), ...access },
           signal,
         ),
       );
@@ -258,23 +256,23 @@ export default function Vision() {
 
   function startAll() {
     setActionError("");
-    if (!requireKey()) return;
-    const runnable = selected.filter((id) => available.some((m) => m.id === id));
+    if (!requireModels()) return;
+    const runnable = selected;
     if (!runnable.length) return setActionError("请至少选择一个模型。");
     dispatch({ type: "consensusUpdate", consensus: undefined });
     runnable.forEach((m) => void understand(m));
   }
 
   function retry(model: string) {
-    if (requireKey()) void understand(model);
+    if (requireModels()) void understand(model);
   }
   function retryScore(model: string) {
     const u = state.runs[model]?.understanding;
-    if (u && state.image && requireKey()) void score(model, u, state.image);
+    if (u && state.image && requireModels()) void score(model, u, state.image);
   }
 
   async function consensus() {
-    if (!requireKey()) return;
+    if (!requireModels()) return;
     const signal = ctrl.current.signal;
     const results = Object.values(state.runs)
       .filter((r) => r.status === "done" && r.understanding)
@@ -286,7 +284,7 @@ export default function Vision() {
     try {
       const result = await runJob<ConsensusResult>(
         "consensus",
-        { results, judge_model: judge, gateway, api_key: apiKey },
+        { results, judge: refFor(judge), ...access },
         signal,
       );
       if (!signal.aborted)
@@ -307,7 +305,7 @@ export default function Vision() {
     setActionError("");
     const understanding = state.runs[sourceModel]?.understanding;
     const image = state.image;
-    if (!understanding || !image || !requireKey()) return;
+    if (!understanding || !image || !requireModels()) return;
     const signal = ctrl.current.signal;
     const id = `gen-${Date.now()}-${++generationSeq}`;
     dispatch({
@@ -318,7 +316,7 @@ export default function Vision() {
       const r = await withImage(image, (img) =>
         runJob<GenerateResult>(
           "generate",
-          { image: img, model: generator, understanding, gateway, api_key: apiKey },
+          { image: img, model: refFor(generator), understanding, ...access },
           signal,
         ),
       );
@@ -384,10 +382,10 @@ export default function Vision() {
         title="从看见，到真正理解。"
         description="同一张工程图纸，交给多个视觉模型理解并打分，再把理解 1:1 还原为可编辑的 DXF。"
         action={
-          <span className="header-chip">
+          <a className="header-chip" href="#models">
             <span className="live-dot" />
-            {GATEWAY_NAMES[gateway]} · {available.length || "—"} 个模型
-          </span>
+            {available.length || "—"} 个模型可用 · 模型设置
+          </a>
         }
       />
       <nav className="vision-steps" aria-label="实验步骤">
@@ -411,17 +409,13 @@ export default function Vision() {
           image={state.image}
           imageName={state.imageName}
           scorable={state.scorable}
-          gateway={gateway}
-          onGateway={changeGateway}
-          apiKey={apiKey}
-          remember={remember}
+          models={usable.map((o) => ({ name: o.name, badge: o.badge }))}
+          pending={pending.map((o) => `${o.name}：${o.problem ?? "未就绪"}`)}
           onSelect={(image, imageName, scorable, file) => {
             uploadFile.current = image.kind === "upload" ? file : undefined;
             resetJobs();
             dispatch({ type: "selectImage", image, imageName, scorable });
           }}
-          onKey={(key) => changeKey(key)}
-          onRemember={(keep) => changeKey(apiKey, keep)}
           onNext={() => go(2)}
         />
       )}
@@ -432,17 +426,16 @@ export default function Vision() {
           runs={state.runs}
           scorable={state.scorable && state.image?.kind === "sample"}
           consensus={state.consensus}
-          gateway={gateway}
           judge={judge}
           onJudge={changeJudge}
           error={actionError}
           onToggle={(id) =>
-            setSelected((cur) =>
+            setDeselected((cur) =>
               cur.includes(id) ? cur.filter((m) => m !== id) : [...cur, id],
             )
           }
           onToggleAll={(all) =>
-            setSelected(all ? available.map((m) => m.id) : [])
+            setDeselected(all ? [] : available.map((m) => m.id))
           }
           onStart={startAll}
           onRetry={retry}
@@ -466,8 +459,7 @@ export default function Vision() {
       )}
       <div className="bottom-tip">
         <span>实验手记</span>
-        模型理解、打分与还原都直接调用你所选通道（OpenRouter 或 Kie.ai）的
-        Key；任务结果只在服务器内存中保留 2 小时，上传的图纸在服务器上保留 7 天后自动删除。
+        模型理解、打分与还原按「模型设置」调用对应平台，Key 只随请求发送、服务器不保存；任务结果只在服务器内存中保留 2 小时，上传的图纸在服务器上保留 7 天后自动删除。
       </div>
     </>
   );

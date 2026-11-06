@@ -135,6 +135,10 @@ const GEOMETRY = {
 const SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80"><rect x="10" y="10" width="80" height="60" fill="none" stroke="black"/></svg>';
 
+// Catalog / built-in refs carry an id, custom refs a name.
+const modelOf = (m: { id?: string; name?: string } | string | undefined) =>
+  typeof m === "string" ? m : (m?.id ?? m?.name);
+
 type Job = {
   kind: string;
   model?: string;
@@ -231,6 +235,8 @@ async function mockVision(
     const body =
       req.method() === "POST" && path !== "/images" ? req.postDataJSON() : null;
     if (path === "/models") return route.fulfill({ json: MODELS });
+    if (path === "/builtin")
+      return route.fulfill({ json: { enabled: false, per_hour: 60, models: [] } });
     if (path === "/samples") return route.fulfill({ json: opts.samples });
     if (/^\/(samples\/[^/]+\/image|images\/[^/]+)$/.test(path))
       return route.fulfill({ body: PNG_1x1, contentType: "image/png" });
@@ -252,19 +258,20 @@ async function mockVision(
           json: { detail: "图片已过期，请重新上传。" },
         });
       }
-      const fail = opts.failOnce === body.model && !failed.has(body.model);
-      if (fail) failed.add(body.model);
+      const id = modelOf(body.model);
+      const fail = opts.failOnce === id && !failed.has(id);
+      if (fail) failed.add(id);
       return route.fulfill(
         addJob({
           kind: "understand",
-          model: body.model,
-          gateway: body.gateway,
+          model: id,
+          gateway: body.model?.gateway,
           fail: fail ? "OpenRouter Key 无效或已撤销。" : undefined,
         }),
       );
     }
     if (path === "/score" || path === "/consensus" || path === "/generate")
-      return route.fulfill(addJob({ kind: path.slice(1), model: body.model }));
+      return route.fulfill(addJob({ kind: path.slice(1), model: modelOf(body.model) }));
     if (path === "/export")
       return route.fulfill({
         body: "0\nEOF\n",
@@ -300,8 +307,20 @@ async function mockVision(
   });
 }
 
+async function openSettings(page: Page) {
+  await page.locator(".model-summary").getByRole("link", { name: /模型设置/ }).click();
+  await expect(page.getByRole("heading", { name: "模型设置" })).toBeVisible();
+}
+
+async function backToVision(page: Page) {
+  await page.getByRole("link", { name: /去图像理解/ }).click();
+  await expect(page.getByRole("navigation", { name: "实验步骤" })).toBeVisible();
+}
+
 async function startUnderstanding(page: Page) {
+  await openSettings(page);
   await page.getByLabel("OpenRouter Key").fill("fixture-secret");
+  await backToVision(page);
   await page.getByRole("button", { name: "下一步：理解对比" }).click();
   await page.getByRole("button", { name: "开始理解" }).click();
 }
@@ -313,12 +332,20 @@ test("vision: understand two models, score, redraw and download", async ({
   await page.goto("/#vision");
   await page.getByRole("button", { name: /法兰盘/ }).click();
   await expect(page.getByRole("img", { name: /图纸预览/ })).toBeVisible();
-  await expect(page.getByLabel("在本浏览器记住")).not.toBeChecked();
+  await expect(page.getByText("还没有可用的模型")).toBeVisible();
   const scoreReq = page.waitForRequest(
     (r) => r.url().endsWith("/api/vision/score") && r.method() === "POST",
   );
   await startUnderstanding(page);
-  expect((await scoreReq).postDataJSON().judge_model).toBe("vendor/model-a");
+  const scoreBody = (await scoreReq).postDataJSON();
+  expect(scoreBody.judge).toEqual({
+    source: "catalog",
+    id: "vendor/model-a",
+    gateway: "openrouter",
+    api_key: "fixture-secret",
+  });
+  // The drawing picked before visiting the settings page is still selected.
+  await expect(page.getByText("理解结果")).toBeVisible();
   const cards = page.locator(".vision-model-card");
   await expect(cards).toHaveCount(2);
   await expect(cards.filter({ hasText: "75.0" })).toHaveCount(2, {
@@ -329,8 +356,8 @@ test("vision: understand two models, score, redraw and download", async ({
   await cards.first().getByText("逐项评分").click();
   await expect(cards.first().locator("table")).toContainText("外径 Ø120");
   await page.getByRole("button", { name: "③ 还原" }).click();
-  await expect(page.getByLabel("理解来源")).toHaveValue("vendor/model-a");
-  await expect(page.getByLabel("生成模型")).toHaveValue("vendor/model-a");
+  await expect(page.getByLabel("理解来源")).toHaveValue("catalog:vendor/model-a");
+  await expect(page.getByLabel("生成模型")).toHaveValue("catalog:vendor/model-a");
   await page.getByRole("button", { name: "生成还原图" }).click();
   const gen = page.locator(".vision-generation");
   await expect(gen).toHaveCount(1);
@@ -344,9 +371,6 @@ test("vision: understand two models, score, redraw and download", async ({
   const download = page.waitForEvent("download");
   await gen.getByRole("button", { name: "下载 DXF" }).click();
   expect((await download).suggestedFilename()).toMatch(/\.dxf$/);
-  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(
-    "fixture-secret",
-  );
 });
 
 test("vision: one model fails without affecting others and can retry", async ({
@@ -388,16 +412,16 @@ test("vision: uploaded drawing shows consensus instead of score", async ({
   ).toHaveCount(2, { timeout: 20000 });
   await expect(page.getByText("未评分")).toHaveCount(0);
   const judge = page.getByLabel("评判模型");
-  await expect(judge).toHaveValue("vendor/model-a");
-  await judge.selectOption("vendor/model-b");
+  await expect(judge).toHaveValue("catalog:vendor/model-a");
+  await judge.selectOption("catalog:vendor/model-b");
   const consensusReq = page.waitForRequest(
     (r) => r.url().endsWith("/api/vision/consensus") && r.method() === "POST",
   );
   await page.getByRole("button", { name: "生成一致性对照" }).click();
-  expect((await consensusReq).postDataJSON().judge_model).toBe("vendor/model-b");
+  expect((await consensusReq).postDataJSON().judge.id).toBe("vendor/model-b");
   expect(
     await page.evaluate(() => localStorage.getItem("vision-judge-model")),
-  ).toBe("vendor/model-b");
+  ).toBe("catalog:vendor/model-b");
   await expect(page.locator(".vision-consensus .minority").first()).toBeVisible(
     { timeout: 20000 },
   );
@@ -406,40 +430,85 @@ test("vision: uploaded drawing shows consensus instead of score", async ({
   ).toBeGreaterThanOrEqual(1);
 });
 
-test("vision: Kie.ai gateway runs only the models it serves", async ({
+test("vision: settings pick a platform per model and keys can stay unsaved", async ({
   page,
 }) => {
   await mockVision(page, { samples: [SAMPLE] });
-  const bodies: { model: string; gateway: string; api_key: string }[] = [];
+  const bodies: { model: Record<string, string> }[] = [];
   page.on("request", (r) => {
     if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
       bodies.push(r.postDataJSON());
   });
   await page.goto("/#vision");
   await page.getByRole("button", { name: /法兰盘/ }).click();
-  await expect(page.getByLabel("OpenRouter Key")).toBeVisible();
-  await page.getByRole("radio", { name: /Kie\.ai/ }).click();
-  await expect(page.getByRole("radio", { name: /Kie\.ai/ })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  await openSettings(page);
+  // Model B is only on OpenRouter, so its platform can't be changed.
+  await expect(page.getByLabel("Model B 调用平台")).toBeDisabled();
+  await page.getByLabel("Model A 调用平台").selectOption("kie");
   await page.getByLabel("Kie.ai Key").fill("kie-fixture-secret");
-  await expect(page.getByText("Kie.ai · 1 个模型")).toBeVisible();
+  await page.getByLabel("在本浏览器保存 Key（含访问码和自定义模型的 Key）").uncheck();
+  await backToVision(page);
+  await expect(page.getByText("已就绪 1 个模型")).toBeVisible();
+  await expect(page.getByText(/Model B：未填写 OpenRouter Key/)).toBeVisible();
   await page.getByRole("button", { name: "下一步：理解对比" }).click();
-  await expect(page.getByText("按 Kie.ai 积分计费")).toBeVisible();
-  await expect(page.getByText("Model B")).toHaveCount(0);
+  await expect(page.getByText("Kie.ai · 按 Kie.ai 积分计费")).toBeVisible();
   await page.getByRole("button", { name: "开始理解" }).click();
   const card = page.locator(".vision-model-card", { hasText: "Model A" });
   await expect(card).toContainText("0.28 积分", { timeout: 20000 });
   expect(bodies).toHaveLength(1);
-  expect(bodies[0]).toMatchObject({
-    model: "vendor/model-a",
+  expect(bodies[0].model).toEqual({
+    source: "catalog",
+    id: "vendor/model-a",
     gateway: "kie",
     api_key: "kie-fixture-secret",
   });
   const stored = await page.evaluate(() => JSON.stringify(localStorage));
-  expect(stored).toContain("vision-gateway");
+  expect(stored).toContain("lab-model-settings");
   expect(stored).not.toContain("kie-fixture-secret");
+});
+
+test("vision: a custom model from a platform preset runs with its own key", async ({
+  page,
+}) => {
+  await mockVision(page, { samples: [SAMPLE] });
+  const bodies: { model: Record<string, unknown> }[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
+      bodies.push(r.postDataJSON());
+  });
+  await page.goto("/#models");
+  await page.getByRole("button", { name: "添加模型" }).click();
+  await page.getByLabel("从平台预设开始").selectOption("deepseek");
+  await expect(page.getByLabel("接口地址")).toHaveValue(
+    "https://api.deepseek.com/chat/completions",
+  );
+  await expect(page.getByLabel("JSON 输出方式")).toHaveValue("object");
+  await page.getByLabel("显示名称").fill("我的 DeepSeek");
+  await page.getByLabel("模型名").fill("deepseek-x");
+  await page.getByRole("button", { name: "保存模型" }).click();
+  await expect(page.getByText("请填写这个模型的 API Key。")).toBeVisible();
+  await page.locator(".model-form").getByLabel("API Key").fill("sk-custom");
+  await page.getByRole("button", { name: "保存模型" }).click();
+  await expect(page.locator(".custom-model")).toContainText("api.deepseek.com · deepseek-x");
+  await page.getByRole("link", { name: /去图像理解/ }).click();
+  await page.getByRole("button", { name: /法兰盘/ }).click();
+  await page.getByRole("button", { name: "下一步：理解对比" }).click();
+  await expect(page.getByText("自定义 · api.deepseek.com")).toBeVisible();
+  await page.getByRole("button", { name: "开始理解" }).click();
+  await expect(
+    page.locator(".vision-model-card", { hasText: "我的 DeepSeek" }),
+  ).toContainText("已完成", { timeout: 20000 });
+  expect(bodies[0].model).toEqual({
+    source: "custom",
+    name: "我的 DeepSeek",
+    api: "chat",
+    url: "https://api.deepseek.com/chat/completions",
+    model: "deepseek-x",
+    json_mode: "object",
+    auth: "bearer",
+    max_tokens: 16000,
+    api_key: "sk-custom",
+  });
 });
 
 test("vision: an upload the server lost is re-sent automatically", async ({

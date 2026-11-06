@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Menu,
   ScanLine,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { api } from "./api";
@@ -17,10 +18,11 @@ import Overview from "./pages/Overview";
 import Chunking from "./pages/Chunking";
 import Embedding from "./pages/Embedding";
 import Vision from "./pages/Vision";
+import Models from "./pages/Models";
 const icons = { chunking: Blocks, embedding: AudioLines, vision: ScanLine };
 function currentPage(): Page {
   const key = location.hash.slice(1);
-  return ["chunking", "embedding", "vision"].includes(key)
+  return ["chunking", "embedding", "vision", "models"].includes(key)
     ? (key as Page)
     : "overview";
 }
@@ -29,6 +31,10 @@ export default function App() {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [error, setError] = useState("");
   const [menu, setMenu] = useState(false);
+  const [visionOpened, setVisionOpened] = useState(page === "vision");
+  useEffect(() => {
+    if (page === "vision") setVisionOpened(true);
+  }, [page]);
   useEffect(() => {
     api<Experiment[]>("/experiments")
       .then(setExperiments)
@@ -55,6 +61,7 @@ export default function App() {
           chunking: "文本分块",
           embedding: "Embedding 对比",
           vision: "图像理解",
+          models: "模型设置",
         }[page]);
   return (
     <div className="app-shell">
@@ -111,6 +118,16 @@ export default function App() {
           })}
         </nav>
         <div className="sidebar-bottom">
+          <a
+            href="#models"
+            className={`nav-item sidebar-settings ${page === "models" ? "active" : ""}`}
+            aria-current={page === "models" ? "page" : undefined}
+            onClick={() => setMenu(false)}
+          >
+            <SlidersHorizontal size={17} />
+            <span>模型设置</span>
+            {page === "models" && <span className="active-dot" />}
+          </a>
           <div className="sidebar-note">
             <span className="tiny-spark">✳</span>
             <strong>让想法，经过验证。</strong>
@@ -178,8 +195,10 @@ export default function App() {
           <div hidden={page !== "embedding"}>
             <Embedding />
           </div>
-          <div hidden={page !== "vision"}>
-            {page === "vision" && <Vision />}
+          {/* Kept mounted once opened, so visiting 模型设置 keeps the drawing and results. */}
+          <div hidden={page !== "vision"}>{visionOpened && <Vision />}</div>
+          <div hidden={page !== "models"}>
+            {page === "models" && <Models />}
           </div>
         </main>
         <footer className="main-footer">

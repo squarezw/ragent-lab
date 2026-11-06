@@ -1,60 +1,31 @@
 import { useState } from "react";
-import { ArrowRight, ImageUp, KeyRound, ScanLine } from "lucide-react";
-import {
-  EmptyState,
-  ErrorMessage,
-  ExternalLink,
-  Panel,
-} from "../components/UI";
+import { ArrowRight, ImageUp, ScanLine, SlidersHorizontal } from "lucide-react";
+import { EmptyState, ErrorMessage, Panel } from "../components/UI";
 import { imageUrl, uploadImage } from "./client";
-import { GATEWAY_NAMES, type Gateway, type ImageRef, type Sample } from "./types";
-
-const GATEWAY_INFO: Record<
-  Gateway,
-  { placeholder: string; keyUrl: string; note: string }
-> = {
-  openrouter: {
-    placeholder: "sk-or-…",
-    keyUrl: "https://openrouter.ai/keys",
-    note: "9 个模型",
-  },
-  kie: {
-    placeholder: "Kie.ai API Key",
-    keyUrl: "https://kie.ai/api-key",
-    note: "Claude、GPT、Gemini、Kimi",
-  },
-};
+import type { ImageRef, Sample } from "./types";
 
 export default function StepSelect({
   samples,
   image,
   imageName,
   scorable,
-  gateway,
-  apiKey,
-  remember,
+  models,
+  pending,
   onSelect,
-  onGateway,
-  onKey,
-  onRemember,
   onNext,
 }: {
   samples: Sample[];
   image: ImageRef | null;
   imageName: string;
   scorable: boolean;
-  gateway: Gateway;
-  onGateway: (gateway: Gateway) => void;
-  apiKey: string;
-  remember: boolean;
+  models: { name: string; badge: string }[];
+  pending: string[];
   onSelect: (
     image: ImageRef,
     name: string,
     scorable: boolean,
     file?: File,
   ) => void;
-  onKey: (key: string) => void;
-  onRemember: (remember: boolean) => void;
   onNext: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
@@ -127,8 +98,8 @@ export default function StepSelect({
           )}
         </Panel>
         <Panel
-          title="上传与密钥"
-          meta={<span className="panel-index">02 / UPLOAD · KEY</span>}
+          title="上传与模型"
+          meta={<span className="panel-index">02 / UPLOAD · MODELS</span>}
         >
           <label className="vision-upload">
             <ImageUp size={20} strokeWidth={1.5} />
@@ -150,55 +121,30 @@ export default function StepSelect({
             />
           </label>
           <ErrorMessage message={error} />
-          <div className="api-key-field">
-            <div
-              className="vision-gateway"
-              role="radiogroup"
-              aria-label="模型通道"
-            >
-              {(Object.keys(GATEWAY_NAMES) as Gateway[]).map((g) => (
-                <button
-                  key={g}
-                  type="button"
-                  role="radio"
-                  aria-checked={gateway === g}
-                  className={gateway === g ? "active" : ""}
-                  onClick={() => onGateway(g)}
-                >
-                  <strong>{GATEWAY_NAMES[g]}</strong>
-                  <small>{GATEWAY_INFO[g].note}</small>
-                </button>
-              ))}
+          <div className="api-key-field model-summary">
+            <div>
+              <strong>
+                {models.length
+                  ? `已就绪 ${models.length} 个模型`
+                  : "还没有可用的模型"}
+              </strong>
+              <a className="text-button" href="#models">
+                <SlidersHorizontal size={13} /> 模型设置
+              </a>
             </div>
-            <label htmlFor="vision-key">
-              <KeyRound size={13} />
-              {GATEWAY_NAMES[gateway]} Key
-            </label>
-            <input
-              id="vision-key"
-              aria-label={`${GATEWAY_NAMES[gateway]} Key`}
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder={GATEWAY_INFO[gateway].placeholder}
-              value={apiKey}
-              onChange={(e) => onKey(e.target.value)}
-            />
-            <label className="vision-check">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => onRemember(e.target.checked)}
-              />
-              在本浏览器记住
-            </label>
-            <p className="field-help">
-              Key 只随请求发送给 {GATEWAY_NAMES[gateway]}
-              ，不会保存在服务器或导出文件中。
-              <ExternalLink href={GATEWAY_INFO[gateway].keyUrl}>
-                获取 Key
-              </ExternalLink>
-            </p>
+            {models.length > 0 && (
+              <p className="field-help">
+                {models.map((m) => `${m.name}（${m.badge}）`).join("、")}
+              </p>
+            )}
+            {pending.length > 0 && (
+              <p className="field-help warn">还差一步：{pending.join("；")}</p>
+            )}
+            {!models.length && (
+              <p className="field-help">
+                在「模型设置」里填写 OpenRouter 或 Kie.ai 的 Key、内置模型的访问码，或添加自己的模型接口。
+              </p>
+            )}
           </div>
           <button
             type="button"

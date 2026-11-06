@@ -1,4 +1,4 @@
-export type Page = "overview" | "chunking" | "embedding" | "vision";
+export type Page = "overview" | "chunking" | "embedding" | "vision" | "models";
 export interface Experiment {
   id: string;
   name: string;

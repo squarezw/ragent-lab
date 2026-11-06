@@ -172,7 +172,8 @@ const KEY_NAMES: Record<Gateway, string> = {
 };
 const GATEWAY_NAME = "vision-gateway";
 const JUDGE_NAME = "vision-judge-model";
-export const DEFAULT_JUDGE = "anthropic/claude-opus-5.5";
+// Option key (see modelSettings.buildOptions).
+export const DEFAULT_JUDGE = "catalog:anthropic/claude-opus-5.5";
 
 export const judgeStorage = {
   load(): string {

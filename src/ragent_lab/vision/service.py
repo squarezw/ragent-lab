@@ -8,6 +8,7 @@ import string
 from pydantic import BaseModel, ValidationError
 
 from . import prompts
+from .compat import call_endpoint
 from .images import PreparedImage
 from .kie import chat_json as kie_chat_json
 from .openrouter import CallResult, OpenRouterError, chat_json
@@ -20,8 +21,17 @@ _POINTS = {'correct': 1.0, 'uncertain': 0.5, 'wrong': 0.0}
 
 async def _call(gateway: str, api_key: str, model: dict, messages: list[dict],
                 schema_name: str, schema: dict) -> CallResult:
+    """gateway: 'openrouter' | 'kie' (catalog models), 'builtin' | 'custom' (own endpoint)."""
+    if gateway in ('builtin', 'custom'):
+        return await call_endpoint(api_key, model['endpoint'], model, messages,
+                                   schema_name, schema)
     fn = kie_chat_json if gateway == 'kie' else chat_json
     return await fn(api_key, model, messages, schema_name, schema)
+
+
+def _model(model: str | dict) -> dict:
+    """A catalog id, or an already resolved built-in / custom model dict."""
+    return model if isinstance(model, dict) else get_model(model)
 
 
 def _meta(call: CallResult, model: dict, gateway: str = 'openrouter') -> dict:
@@ -51,9 +61,9 @@ def _dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
-async def understand(api_key: str, model_id: str, image: PreparedImage,
+async def understand(api_key: str, model_id: str | dict, image: PreparedImage,
                      gateway: str = 'openrouter') -> dict:
-    model = get_model(model_id)
+    model = _model(model_id)
     messages = [{'role': 'user', 'content': [
         _image_part(image), {'type': 'text', 'text': prompts.UNDERSTAND}]}]
     call = await _call(gateway, api_key, model, messages, 'understanding',
@@ -63,9 +73,9 @@ async def understand(api_key: str, model_id: str, image: PreparedImage,
             'understanding': parsed.model_dump(), 'meta': _meta(call, model, gateway)}
 
 
-async def generate(api_key: str, model_id: str, image: PreparedImage,
+async def generate(api_key: str, model_id: str | dict, image: PreparedImage,
                    understanding: dict, gateway: str = 'openrouter') -> dict:
-    model = get_model(model_id)
+    model = _model(model_id)
     text = prompts.GENERATE + '\n\n理解 JSON：\n' + _dumps(understanding)
     messages = [{'role': 'user', 'content': [
         _image_part(image), {'type': 'text', 'text': text}]}]

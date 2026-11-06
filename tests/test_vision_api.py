@@ -37,12 +37,18 @@ def _write_sample(root: Path, sid: str, status: str) -> None:
         'items': [{'id': 'i1', 'target': 't', 'expected': 'e'}]}), 'utf-8')
 
 
+SEEN_KEYS: list[str] = []
+
+
 async def _fake_understand(api_key, model_id, image, gateway):
-    return {'model': model_id, 'model_name': 'X', 'understanding': UNDERSTANDING,
-            'meta': {'gateway': gateway}}
+    SEEN_KEYS.append(api_key)
+    model = model_id if isinstance(model_id, dict) else {'id': model_id, 'name': 'X'}
+    return {'model': model['id'], 'model_name': model['name'], 'understanding': UNDERSTANDING,
+            'meta': {'gateway': gateway, 'endpoint': (model.get('endpoint') or {}).get('label')}}
 
 
 async def _fake_score(api_key, rubric, understanding, judge, gateway):
+    SEEN_KEYS.append(api_key)
     return {'score': 100.0, 'counts': {}, 'judgements': [],
             'meta': {'judge': judge['id'], 'gateway': gateway}}
 
@@ -338,3 +344,99 @@ async def _fake_prices():
 
 if __name__ == '__main__':
     unittest.main()
+
+
+BUILTIN_ENV = {
+    'VISION_BUILTIN_MODELS': json.dumps([{
+        'id': 'deepseek', 'name': 'DeepSeek（内置）', 'url': 'https://api.deepseek.com/chat/completions',
+        'model': 'deepseek-chat', 'key_env': 'DS_KEY'}]),
+    'DS_KEY': 'sk-server-secret', 'LAB_ACCESS_CODE': 'open-sesame', 'VISION_BUILTIN_PER_HOUR': '2',
+}
+
+
+class ModelRefAPITests(unittest.TestCase):
+    """The model / judge references: catalog via a platform, built-in, custom endpoint."""
+
+    _wait = VisionAPITests._wait
+
+    def setUp(self):
+        VisionAPITests.setUp(self)
+        from ragent_lab.vision.builtin import Builtins
+        p = patch('ragent_lab.api.vision.builtins', Builtins(BUILTIN_ENV))
+        p.start()
+        self.addCleanup(p.stop)
+        SEEN_KEYS.clear()
+
+    def _understand(self, client, model, **extra):
+        return client.post('/api/vision/understand', json={
+            'image': {'kind': 'sample', 'id': 'ok'}, 'model': model, **extra})
+
+    def test_catalog_ref_carries_its_own_key(self):
+        with TestClient(app) as client:
+            r = self._understand(client, {'source': 'catalog', 'id': MODEL, 'gateway': 'kie',
+                                          'api_key': 'kie-key'})
+            job, polled = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['result']['meta']['gateway'], 'kie')
+            self.assertEqual(SEEN_KEYS, ['kie-key'])
+            self.assertTrue(all('kie-key' not in t for t in polled))
+            r = self._understand(client, {'source': 'catalog', 'id': 'qwen/qwen3.8-max-prime',
+                                          'gateway': 'kie', 'api_key': 'k'})
+            self.assertIn('不支持 Kie.ai', r.text)
+            r = self._understand(client, {'source': 'catalog', 'id': MODEL})
+            self.assertIn('请填写 OpenRouter Key', r.text)
+
+    def test_builtin_needs_access_code_and_is_rate_limited(self):
+        with TestClient(app) as client:
+            listed = client.get('/api/vision/builtin').json()
+            self.assertEqual(listed['models'], [{'id': 'deepseek', 'name': 'DeepSeek（内置）',
+                                                 'notes': ''}])
+            self.assertNotIn('sk-server-secret', json.dumps(listed))
+            self.assertNotIn('api.deepseek.com', json.dumps(listed))
+            ref = {'source': 'builtin', 'id': 'deepseek'}
+            r = self._understand(client, ref, access_code='wrong')
+            self.assertEqual(r.status_code, 403)
+            self.assertEqual(client.post('/api/vision/access',
+                                         json={'access_code': 'wrong'}).status_code, 403)
+            self.assertEqual(client.post('/api/vision/access',
+                                         json={'access_code': 'open-sesame'}).json(), {'ok': True})
+            r = self._understand(client, ref, access_code='open-sesame')
+            job, polled = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['result']['model'], 'builtin:deepseek')
+            self.assertEqual(job['result']['meta']['gateway'], 'builtin')
+            self.assertEqual(SEEN_KEYS, ['sk-server-secret'])
+            self.assertTrue(all('sk-server-secret' not in t for t in polled))
+            # Built-in judge counts against the same hourly limit (2 per IP).
+            r = client.post('/api/vision/score', json={
+                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'judge': ref,
+                'access_code': 'open-sesame'})
+            self.assertEqual(self._wait(client, r.json()['job_id'])[0]['status'], 'done')
+            r = self._understand(client, ref, access_code='open-sesame')
+            self.assertEqual(r.status_code, 429)
+            self.assertIn('每小时最多调用 2 次', r.text)
+            r = self._understand(client, {'source': 'builtin', 'id': 'nope'},
+                                 access_code='open-sesame')
+            self.assertIn('该内置模型不可用', r.text)
+
+    def test_custom_endpoint(self):
+        ref = {'source': 'custom', 'name': 'DeepSeek 官方', 'api': 'chat',
+               'url': 'https://api.deepseek.com/chat/completions', 'model': 'deepseek-chat',
+               'json_mode': 'object', 'api_key': 'sk-custom-secret'}
+        with TestClient(app) as client:
+            with patch('ragent_lab.api.vision.netguard.check_public_https',
+                       return_value='api.deepseek.com'):
+                r = self._understand(client, ref)
+                job, polled = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['result']['model_name'], 'DeepSeek 官方')
+            self.assertEqual(job['result']['meta'], {'gateway': 'custom',
+                                                     'endpoint': 'api.deepseek.com'})
+            self.assertEqual(SEEN_KEYS, ['sk-custom-secret'])
+            self.assertTrue(all('sk-custom-secret' not in t for t in polled))
+            from ragent_lab.vision.netguard import UnsafeURL
+            with patch('ragent_lab.api.vision.netguard.check_public_https',
+                       side_effect=UnsafeURL('接口地址不能指向本机或内网')):
+                r = self._understand(client, {**ref, 'url': 'https://10.0.0.1/v1'})
+            self.assertEqual(r.status_code, 422)
+            self.assertIn('内网', r.text)
+            r = self._understand(client, {**ref, 'api': 'grpc'})
+            self.assertEqual(r.status_code, 422)
+            self.assertNotIn('sk-custom-secret', r.text)
