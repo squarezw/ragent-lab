@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from pydantic import ValidationError
 from ragent_lab.vision.schema import (
-    Geometry, Understanding, model_json_schema_for,
+    ConsensusResult, Geometry, JudgeResult, Understanding, model_json_schema_for,
 )
 
 
@@ -117,6 +117,24 @@ class GeometryTests(unittest.TestCase):
                 dumped = json.dumps(model_json_schema_for(cls))
                 self.assertNotIn('$ref', dumped)
                 self.assertNotIn('#/$defs', dumped)
+
+    def test_json_schema_has_no_optional_properties(self):
+        # Anthropic rejects response schemas with more than 24 optional properties.
+        def optional(node):
+            if isinstance(node, dict):
+                n = 0
+                if isinstance(node.get('properties'), dict):
+                    n = len(set(node['properties']) - set(node.get('required', [])))
+                return n + sum(optional(v) for v in node.values())
+            if isinstance(node, list):
+                return sum(optional(v) for v in node)
+            return 0
+
+        for cls in (Understanding, Geometry, JudgeResult, ConsensusResult):
+            with self.subTest(cls.__name__):
+                self.assertEqual(optional(model_json_schema_for(cls)), 0)
+        # Defaults still apply when a model leaves a field out.
+        self.assertEqual(ConsensusResult.model_validate({'groups': []}).singletons, [])
 
 
 if __name__ == '__main__':
