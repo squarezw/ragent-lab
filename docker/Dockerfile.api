@@ -6,7 +6,7 @@ COPY requirements-api.txt requirements-models.txt ./
 RUN pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements-models.txt \
     && python -m nltk.downloader -d /app/nltk_data punkt punkt_tab
-RUN useradd --create-home --uid 10001 lab && mkdir -p /cache/huggingface && chown -R lab:lab /cache /app
+RUN useradd --create-home --uid 10001 lab && mkdir -p /cache/huggingface /data/vision-uploads && chown -R lab:lab /cache /app /data
 USER lab
 # Pre-build ezdxf's font cache (cacheable layer, lives in the lab user's HOME).
 RUN python -c "import ezdxf.fonts.fonts"

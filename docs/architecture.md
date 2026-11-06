@@ -55,4 +55,4 @@ API 不导入 Streamlit，不返回模型实例、函数或服务端密钥。验
 
 ## 扩展
 
-实验目录是前后端共享的发现入口。每个新实验增加独立页面和 API 模块。图像理解（`vision`）通过访客选择的通道（OpenRouter，或 Kie.ai：仅 Claude、GPT、Gemini、Kimi）调用视觉模型，Key 由访客在网页输入，请求体用 `gateway` 字段区分；Kie.ai 按积分计费，结果里记为 `credits`。长耗时的理解、打分、一致性和生成走内存任务队列（2 小时过期，不落盘），前端轮询 `/api/vision/jobs/{job_id}`。内置样例和细则放在仓库外的 `VISION_SAMPLES_DIR`，格式见 README“图像理解样例”。
+实验目录是前后端共享的发现入口。每个新实验增加独立页面和 API 模块。图像理解（`vision`）通过访客选择的通道（OpenRouter，或 Kie.ai：仅 Claude、GPT、Gemini、Kimi）调用视觉模型，Key 由访客在网页输入，请求体用 `gateway` 字段区分；Kie.ai 按积分计费，结果里记为 `credits`。长耗时的理解、打分、一致性和生成走内存任务队列（2 小时过期，不落盘），前端轮询 `/api/vision/jobs/{job_id}`。上传的图纸存在 `VISION_UPLOAD_DIR`（Docker 卷，默认 7 天过期）。内置样例和细则放在仓库外的 `VISION_SAMPLES_DIR`，格式见 README“图像理解样例”。

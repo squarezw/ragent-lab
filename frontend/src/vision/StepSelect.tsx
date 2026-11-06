@@ -47,7 +47,12 @@ export default function StepSelect({
   onGateway: (gateway: Gateway) => void;
   apiKey: string;
   remember: boolean;
-  onSelect: (image: ImageRef, name: string, scorable: boolean) => void;
+  onSelect: (
+    image: ImageRef,
+    name: string,
+    scorable: boolean,
+    file?: File,
+  ) => void;
   onKey: (key: string) => void;
   onRemember: (remember: boolean) => void;
   onNext: () => void;
@@ -65,6 +70,7 @@ export default function StepSelect({
         { kind: "upload", id: out.image_id },
         out.name || file.name,
         false,
+        file,
       );
     } catch (e) {
       setError((e as Error).message);

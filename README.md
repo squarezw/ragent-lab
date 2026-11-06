@@ -132,7 +132,7 @@ VISION_SAMPLES_DIR=~/Documents/AI/ragent-lab-vision-samples python -m uvicorn ra
 bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 ```
 
-上传图片上限 15 MB。前端容器的 Nginx 已设置 `client_max_body_size 16m`；生产主机 Nginx 转发 `lab.ragents.net` 时，也必须允许不小于 16 MB 的请求体（`client_max_body_size 16m;` 或更大），否则上传会被主机 Nginx 以 413 拒绝。
+上传图片上限 15 MB。上传的图纸存进 API 容器的 Docker 卷 `vision-uploads`（`VISION_UPLOAD_DIR=/data/vision-uploads`），重启和发版后仍在，`VISION_UPLOAD_TTL_HOURS`（默认 168，即 7 天）后自动删除，最多保留 `VISION_UPLOAD_MAX_FILES`（默认 2000）张；未设置 `VISION_UPLOAD_DIR` 时只存内存。服务器上找不到图片时，页面会用浏览器里的原文件自动重新上传一次。前端容器的 Nginx 已设置 `client_max_body_size 16m`；生产主机 Nginx 转发 `lab.ragents.net` 时，也必须允许不小于 16 MB 的请求体（`client_max_body_size 16m;` 或更大），否则上传会被主机 Nginx 以 413 拒绝。
 
 ## GitHub Actions CI/CD
 
