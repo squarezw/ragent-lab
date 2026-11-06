@@ -2525,8 +2525,22 @@ main {
   display: flex;
   align-items: center;
   gap: 7px;
+  flex-wrap: wrap;
   font-size: 10px;
   color: #87977d;
+}
+.vision-judge-note label {
+  color: #47603f;
+  font-weight: 600;
+}
+.vision-judge-note select {
+  border: 1px solid #dde5d7;
+  border-radius: 6px;
+  background: #fcfdf9;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: #47603f;
+  max-width: 100%;
 }
 .vision-panel-meta {
   display: flex;

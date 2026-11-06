@@ -41,12 +41,12 @@ async def _fake_understand(api_key, model_id, image):
     return {'model': model_id, 'model_name': 'X', 'understanding': UNDERSTANDING, 'meta': {}}
 
 
-async def _fake_score(api_key, rubric, understanding):
-    return {'score': 100.0, 'counts': {}, 'judgements': [], 'meta': {}}
+async def _fake_score(api_key, rubric, understanding, judge):
+    return {'score': 100.0, 'counts': {}, 'judgements': [], 'meta': {'judge': judge['id']}}
 
 
-async def _fake_consensus(api_key, results):
-    return {'groups': [], 'singletons': [], 'meta': {}}
+async def _fake_consensus(api_key, results, judge):
+    return {'groups': [], 'singletons': [], 'meta': {'judge': judge['id']}}
 
 
 async def _fake_generate(api_key, model_id, image, understanding):
@@ -133,10 +133,26 @@ class VisionAPITests(unittest.TestCase):
                 'sample_id': 'ok', 'understanding': UNDERSTANDING, 'api_key': KEY})
             job, _ = self._wait(client, r.json()['job_id'])
             self.assertEqual(job['result']['score'], 100.0)
+            self.assertEqual(job['result']['meta']['judge'], 'anthropic/claude-opus-5.5')
+            r = client.post('/api/vision/score', json={
+                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'api_key': KEY,
+                'judge_model': 'qwen/qwen3.8-max-prime'})
+            job, _ = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['result']['meta']['judge'], 'qwen/qwen3.8-max-prime')
             two = [{'model_name': 'A', 'understanding': UNDERSTANDING},
                    {'model_name': 'B', 'understanding': UNDERSTANDING}]
             r = client.post('/api/vision/consensus', json={'results': two, 'api_key': KEY})
             self.assertEqual(self._wait(client, r.json()['job_id'])[0]['status'], 'done')
+            r = client.post('/api/vision/consensus', json={
+                'results': two, 'api_key': KEY, 'judge_model': 'google/gemini-4-argon'})
+            job, _ = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['result']['meta']['judge'], 'google/gemini-4-argon')
+            for path, extra in (('score', {'sample_id': 'ok', 'understanding': UNDERSTANDING}),
+                                ('consensus', {'results': two})):
+                r = client.post(f'/api/vision/{path}', json={
+                    **extra, 'api_key': KEY, 'judge_model': 'x/unknown'})
+                self.assertEqual(r.status_code, 422)
+                self.assertIn('未知评判模型', r.text)
             r = client.post('/api/vision/consensus', json={'results': two[:1], 'api_key': KEY})
             self.assertEqual(r.status_code, 422)
             r = client.post('/api/vision/generate', json={

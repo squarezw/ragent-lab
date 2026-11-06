@@ -293,7 +293,11 @@ test("vision: understand two models, score, redraw and download", async ({
   await page.getByRole("button", { name: /法兰盘/ }).click();
   await expect(page.getByRole("img", { name: /图纸预览/ })).toBeVisible();
   await expect(page.getByLabel("在本浏览器记住")).not.toBeChecked();
+  const scoreReq = page.waitForRequest(
+    (r) => r.url().endsWith("/api/vision/score") && r.method() === "POST",
+  );
   await startUnderstanding(page);
+  expect((await scoreReq).postDataJSON().judge_model).toBe("vendor/model-a");
   const cards = page.locator(".vision-model-card");
   await expect(cards).toHaveCount(2);
   await expect(cards.filter({ hasText: "75.0" })).toHaveCount(2, {
@@ -362,7 +366,17 @@ test("vision: uploaded drawing shows consensus instead of score", async ({
     page.locator(".vision-model-card", { hasText: "已完成" }),
   ).toHaveCount(2, { timeout: 20000 });
   await expect(page.getByText("未评分")).toHaveCount(0);
+  const judge = page.getByLabel("评判模型");
+  await expect(judge).toHaveValue("vendor/model-a");
+  await judge.selectOption("vendor/model-b");
+  const consensusReq = page.waitForRequest(
+    (r) => r.url().endsWith("/api/vision/consensus") && r.method() === "POST",
+  );
   await page.getByRole("button", { name: "生成一致性对照" }).click();
+  expect((await consensusReq).postDataJSON().judge_model).toBe("vendor/model-b");
+  expect(
+    await page.evaluate(() => localStorage.getItem("vision-judge-model")),
+  ).toBe("vendor/model-b");
   await expect(page.locator(".vision-consensus .minority").first()).toBeVisible(
     { timeout: 20000 },
   );

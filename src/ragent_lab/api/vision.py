@@ -15,7 +15,7 @@ from ..vision.images import (MAX_UPLOAD_BYTES, ImageRejected, PreparedImage, get
                              images, load_samples, prepare_image)
 from ..vision.openrouter import OpenRouterError
 from ..vision.jobs import public, runner
-from ..vision.registry import JUDGE_MODEL, VISION_MODELS, get_model, model_prices
+from ..vision.registry import JUDGE_MODEL, VISION_MODELS, get_model, judge_model, model_prices
 from ..vision.schema import Geometry, Understanding
 
 router = APIRouter(prefix='/api/vision')
@@ -49,6 +49,7 @@ class GenerateBody(UnderstandBody):
 class ScoreBody(_Keyed):
     sample_id: str
     understanding: Understanding
+    judge_model: str | None = None
 
 
 class ConsensusItem(_Body):
@@ -58,6 +59,7 @@ class ConsensusItem(_Body):
 
 class ConsensusBody(_Keyed):
     results: list[ConsensusItem] = Field(min_length=2, max_length=9)
+    judge_model: str | None = None
 
 
 class ExportBody(_Body):
@@ -89,6 +91,13 @@ def _check_model(model_id: str) -> None:
         get_model(model_id)
     except KeyError:
         raise HTTPException(422, '未知模型') from None
+
+
+def _judge(model_id: str | None) -> dict:
+    try:
+        return judge_model(model_id)
+    except KeyError:
+        raise HTTPException(422, '未知评判模型') from None
 
 
 def _png(image: PreparedImage | None) -> Response:
@@ -168,21 +177,23 @@ async def score(body: ScoreBody):
     if sample is None or sample.rubric is None or sample.rubric.rubric_status != 'approved' \
             or not sample.rubric.items:
         raise HTTPException(422, '该样例没有可用的评分细则')
+    judge = _judge(body.judge_model)
     rubric, understanding = sample.rubric, body.understanding.model_dump()
 
     async def factory():
-        return await service.score(key, rubric, understanding)
+        return await service.score(key, rubric, understanding, judge)
     return _job('score', sample.name, factory)
 
 
 @router.post('/consensus')
 async def consensus(body: ConsensusBody):
     key = _key(body)
+    judge = _judge(body.judge_model)
     results = [{'model_name': r.model_name, 'understanding': r.understanding.model_dump()}
                for r in body.results]
 
     async def factory():
-        return await service.consensus(key, results)
+        return await service.consensus(key, results, judge)
     return _job('consensus', f'{len(results)} 个模型', factory)
 
 
