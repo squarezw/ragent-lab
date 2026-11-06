@@ -79,11 +79,13 @@ def _responses_body(route: dict, messages: list[dict], schema_name: str, schema:
                                 'strict': False, 'schema': schema}}}
 
 
-def _chat_body(route: dict, model: dict, messages: list[dict], schema_name: str,
-               schema: dict) -> dict:
-    body: dict = {'messages': messages, 'stream': False, 'max_tokens': model['max_tokens'],
-                  'response_format': {'type': 'json_schema', 'json_schema': {
-                      'name': schema_name, 'strict': False, 'schema': schema}}}
+def _chat_body(route: dict, model: dict, messages: list[dict]) -> dict:
+    # No response_format: Kie.ai's validator reads any property named "type" (our features,
+    # views and dimensions all have one) as the JSON-schema keyword and rejects the schema
+    # with 422. The prompt already carries the schema, so ask for JSON only, as for Claude.
+    parts = _parts(messages) + [{'type': 'text', 'text': JSON_ONLY}]
+    body: dict = {'messages': [{'role': 'user', 'content': parts}], 'stream': False,
+                  'max_tokens': model['max_tokens']}
     if route.get('model'):
         body['model'] = route['model']
     return body
@@ -169,7 +171,7 @@ async def chat_json(api_key: str, model: dict, messages: list[dict],
     elif api == 'responses':
         body = _responses_body(route, messages, schema_name, schema)
     else:
-        body = _chat_body(route, model, messages, schema_name, schema)
+        body = _chat_body(route, model, messages)
 
     started = time.perf_counter()
     try:

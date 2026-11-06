@@ -102,8 +102,11 @@ class KieCallTests(unittest.TestCase):
         self.assertEqual(seen[0].url.path, '/gemini-4-argon-openai/v1/chat/completions')
         body = json.loads(seen[0].content)
         self.assertNotIn('model', body)
-        self.assertEqual(body['messages'], MSGS)
-        self.assertEqual(body['response_format']['json_schema']['schema'], SCHEMA)
+        # Kie.ai rejects schemas with a property named "type", so none is sent on this route.
+        self.assertNotIn('response_format', body)
+        content = body['messages'][0]['content']
+        self.assertEqual(content[:2], MSGS[0]['content'])
+        self.assertIn('JSON', content[2]['text'])
         self.assertEqual((r.content, r.credits, r.usage), ({'a': 3}, 0.01, {'total_tokens': 9}))
 
     def test_truncation_per_format(self):
