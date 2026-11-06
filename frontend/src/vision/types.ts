@@ -1,5 +1,12 @@
 // Mirrors the backend JSON (src/ragent_lab/api/vision.py, vision/schema.py, service.py).
 
+export type Gateway = "openrouter" | "kie";
+
+export const GATEWAY_NAMES: Record<Gateway, string> = {
+  openrouter: "OpenRouter",
+  kie: "Kie.ai",
+};
+
 export type VisionModel = {
   id: string;
   name: string;
@@ -11,6 +18,7 @@ export type VisionModel = {
     reasoning: Record<string, unknown> | null;
   };
   price: { prompt: string | null; completion: string | null } | null;
+  gateways?: Gateway[];
 };
 
 export type Sample = { id: string; name: string; scorable: boolean };
@@ -122,6 +130,8 @@ export type Judgement = {
 };
 
 export type RunMeta = {
+  gateway?: Gateway;
+  credits?: number | null;
   model: string;
   provider: string | null;
   finish_reason: string | null;

@@ -15,7 +15,8 @@ from ..vision.images import (MAX_UPLOAD_BYTES, ImageRejected, PreparedImage, get
                              images, load_samples, prepare_image)
 from ..vision.openrouter import OpenRouterError
 from ..vision.jobs import public, runner
-from ..vision.registry import JUDGE_MODEL, VISION_MODELS, get_model, judge_model, model_prices
+from ..vision.registry import (JUDGE_MODEL, VISION_MODELS, gateways_of, get_model, judge_model,
+                               model_prices)
 from ..vision.schema import Geometry, Understanding
 
 router = APIRouter(prefix='/api/vision')
@@ -30,6 +31,7 @@ class _Body(BaseModel):
 
 class _Keyed(_Body):
     api_key: SecretStr = SecretStr('')
+    gateway: Literal['openrouter', 'kie'] = 'openrouter'
 
 
 class ImageRef(_Body):
@@ -68,10 +70,13 @@ class ExportBody(_Body):
     filename: str = Field(default='drawing', max_length=200)
 
 
+GATEWAY_NAMES = {'openrouter': 'OpenRouter', 'kie': 'Kie.ai'}
+
+
 def _key(body: _Keyed) -> str:
     key = body.api_key.get_secret_value().strip()
     if not key:
-        raise HTTPException(422, '请填写 OpenRouter Key')
+        raise HTTPException(422, f'请填写 {GATEWAY_NAMES[body.gateway]} Key')
     return key
 
 
@@ -86,18 +91,23 @@ def _resolve_image(ref: ImageRef) -> PreparedImage:
     return found
 
 
-def _check_model(model_id: str) -> None:
+def _check_model(model_id: str, gateway: str = 'openrouter') -> None:
     try:
-        get_model(model_id)
+        model = get_model(model_id)
     except KeyError:
         raise HTTPException(422, '未知模型') from None
+    if gateway not in gateways_of(model):
+        raise HTTPException(422, f'{model["name"]} 不支持 {GATEWAY_NAMES[gateway]}')
 
 
-def _judge(model_id: str | None) -> dict:
+def _judge(model_id: str | None, gateway: str = 'openrouter') -> dict:
     try:
-        return judge_model(model_id)
+        judge = judge_model(model_id)
     except KeyError:
         raise HTTPException(422, '未知评判模型') from None
+    if gateway not in gateways_of(judge):
+        raise HTTPException(422, f'评判模型 {judge["name"]} 不支持 {GATEWAY_NAMES[gateway]}')
+    return judge
 
 
 def _png(image: PreparedImage | None) -> Response:
@@ -116,7 +126,7 @@ async def models():
     return [{'id': m['id'], 'name': m['name'], 'family': m['family'], 'notes': m['notes'],
              'params': {'max_tokens': m['max_tokens'], 'temperature': m['temperature'],
                         'reasoning': m['reasoning']},
-             'price': prices.get(m['id'])} for m in VISION_MODELS]
+             'price': prices.get(m['id']), 'gateways': gateways_of(m)} for m in VISION_MODELS]
 
 
 @router.get('/judge')
@@ -160,52 +170,52 @@ async def upload_image(file: UploadFile = File(...)):
 
 @router.post('/understand')
 async def understand(body: UnderstandBody):
-    key = _key(body)
-    _check_model(body.model)
+    key, gateway = _key(body), body.gateway
+    _check_model(body.model, body.gateway)
     image = _resolve_image(body.image)
     model_id = body.model
 
     async def factory():
-        return await service.understand(key, model_id, image)
+        return await service.understand(key, model_id, image, gateway)
     return _job('understand', get_model(model_id)['name'], factory)
 
 
 @router.post('/score')
 async def score(body: ScoreBody):
-    key = _key(body)
+    key, gateway = _key(body), body.gateway
     sample = get_sample(body.sample_id)
     if sample is None or sample.rubric is None or sample.rubric.rubric_status != 'approved' \
             or not sample.rubric.items:
         raise HTTPException(422, '该样例没有可用的评分细则')
-    judge = _judge(body.judge_model)
+    judge = _judge(body.judge_model, body.gateway)
     rubric, understanding = sample.rubric, body.understanding.model_dump()
 
     async def factory():
-        return await service.score(key, rubric, understanding, judge)
+        return await service.score(key, rubric, understanding, judge, gateway)
     return _job('score', sample.name, factory)
 
 
 @router.post('/consensus')
 async def consensus(body: ConsensusBody):
-    key = _key(body)
-    judge = _judge(body.judge_model)
+    key, gateway = _key(body), body.gateway
+    judge = _judge(body.judge_model, body.gateway)
     results = [{'model_name': r.model_name, 'understanding': r.understanding.model_dump()}
                for r in body.results]
 
     async def factory():
-        return await service.consensus(key, results, judge)
+        return await service.consensus(key, results, judge, gateway)
     return _job('consensus', f'{len(results)} 个模型', factory)
 
 
 @router.post('/generate')
 async def generate(body: GenerateBody):
-    key = _key(body)
-    _check_model(body.model)
+    key, gateway = _key(body), body.gateway
+    _check_model(body.model, body.gateway)
     image = _resolve_image(body.image)
     model_id, understanding = body.model, body.understanding
 
     async def factory():
-        out = await service.generate(key, model_id, image, understanding.model_dump())
+        out = await service.generate(key, model_id, image, understanding.model_dump(), gateway)
         geometry = Geometry.model_validate(out['geometry'])
         try:
             rendered = await bounded_render('generate', render.render_all, geometry, understanding)

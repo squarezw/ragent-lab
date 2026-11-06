@@ -3,9 +3,13 @@ import { Download, GitCompareArrows, Scale, Upload } from "lucide-react";
 import { ErrorMessage, Panel, RunButton } from "../components/UI";
 import ModelStatusCard from "./ModelStatusCard";
 import type { ConsensusEntry, RunEntry } from "./state";
-import type { ConsensusResult, VisionModel } from "./types";
+import type { ConsensusResult, Gateway, VisionModel } from "./types";
 
-export function formatPrice(price: VisionModel["price"]): string {
+export function formatPrice(
+  price: VisionModel["price"],
+  gateway: Gateway = "openrouter",
+): string {
+  if (gateway === "kie") return "按 Kie.ai 积分计费";
   if (!price || price.prompt == null || price.completion == null)
     return "价格未知";
   const perM = (v: string) => {
@@ -60,6 +64,7 @@ export default function StepUnderstand({
   runs,
   scorable,
   consensus,
+  gateway,
   judge,
   onJudge,
   error,
@@ -78,6 +83,7 @@ export default function StepUnderstand({
   runs: Record<string, RunEntry>;
   scorable: boolean;
   consensus?: ConsensusEntry;
+  gateway: Gateway;
   judge: string;
   onJudge: (model: string) => void;
   error: string;
@@ -189,7 +195,7 @@ export default function StepUnderstand({
                 />
                 <span>
                   <strong>{m.name}</strong>
-                  <small>{formatPrice(m.price)}</small>
+                  <small>{formatPrice(m.price, gateway)}</small>
                 </span>
               </label>
             ))}

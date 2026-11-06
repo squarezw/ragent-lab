@@ -38,6 +38,7 @@ class CallResult:
     usage: dict
     cost: float | None
     elapsed_ms: float
+    credits: float | None = None  # Kie.ai bills in credits, not USD
 
 
 def new_client() -> httpx.AsyncClient:

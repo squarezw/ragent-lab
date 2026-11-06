@@ -83,6 +83,7 @@ const MODELS = [
     notes: "",
     params: { max_tokens: 8000, temperature: 0, reasoning: null },
     price: { prompt: "0.000003", completion: "0.000015" },
+    gateways: ["openrouter", "kie"],
   },
   {
     id: "vendor/model-b",
@@ -91,6 +92,7 @@ const MODELS = [
     notes: "",
     params: { max_tokens: 8000, temperature: 0, reasoning: null },
     price: null,
+    gateways: ["openrouter"],
   },
 ];
 const META = {
@@ -133,7 +135,13 @@ const GEOMETRY = {
 const SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80"><rect x="10" y="10" width="80" height="60" fill="none" stroke="black"/></svg>';
 
-type Job = { kind: string; model?: string; polls: number; fail?: string };
+type Job = {
+  kind: string;
+  model?: string;
+  gateway?: string;
+  polls: number;
+  fail?: string;
+};
 
 async function mockVision(
   page: Page,
@@ -155,7 +163,10 @@ async function mockVision(
           model: job.model,
           model_name: name,
           understanding: UNDERSTANDING,
-          meta: META,
+          meta:
+            job.gateway === "kie"
+              ? { ...META, gateway: "kie", cost: null, credits: 0.28 }
+              : META,
         };
       case "score":
         return {
@@ -238,6 +249,7 @@ async function mockVision(
         addJob({
           kind: "understand",
           model: body.model,
+          gateway: body.gateway,
           fail: fail ? "OpenRouter Key 无效或已撤销。" : undefined,
         }),
       );
@@ -383,4 +395,40 @@ test("vision: uploaded drawing shows consensus instead of score", async ({
   expect(
     await page.locator(".vision-consensus .minority").count(),
   ).toBeGreaterThanOrEqual(1);
+});
+
+test("vision: Kie.ai gateway runs only the models it serves", async ({
+  page,
+}) => {
+  await mockVision(page, { samples: [SAMPLE] });
+  const bodies: { model: string; gateway: string; api_key: string }[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
+      bodies.push(r.postDataJSON());
+  });
+  await page.goto("/#vision");
+  await page.getByRole("button", { name: /法兰盘/ }).click();
+  await expect(page.getByLabel("OpenRouter Key")).toBeVisible();
+  await page.getByRole("radio", { name: /Kie\.ai/ }).click();
+  await expect(page.getByRole("radio", { name: /Kie\.ai/ })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await page.getByLabel("Kie.ai Key").fill("kie-fixture-secret");
+  await expect(page.getByText("Kie.ai · 1 个模型")).toBeVisible();
+  await page.getByRole("button", { name: "下一步：理解对比" }).click();
+  await expect(page.getByText("按 Kie.ai 积分计费")).toBeVisible();
+  await expect(page.getByText("Model B")).toHaveCount(0);
+  await page.getByRole("button", { name: "开始理解" }).click();
+  const card = page.locator(".vision-model-card", { hasText: "Model A" });
+  await expect(card).toContainText("0.28 积分", { timeout: 20000 });
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toMatchObject({
+    model: "vendor/model-a",
+    gateway: "kie",
+    api_key: "kie-fixture-secret",
+  });
+  const stored = await page.evaluate(() => JSON.stringify(localStorage));
+  expect(stored).toContain("vision-gateway");
+  expect(stored).not.toContain("kie-fixture-secret");
 });

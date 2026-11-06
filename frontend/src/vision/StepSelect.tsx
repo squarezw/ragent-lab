@@ -7,16 +7,34 @@ import {
   Panel,
 } from "../components/UI";
 import { imageUrl, uploadImage } from "./client";
-import type { ImageRef, Sample } from "./types";
+import { GATEWAY_NAMES, type Gateway, type ImageRef, type Sample } from "./types";
+
+const GATEWAY_INFO: Record<
+  Gateway,
+  { placeholder: string; keyUrl: string; note: string }
+> = {
+  openrouter: {
+    placeholder: "sk-or-…",
+    keyUrl: "https://openrouter.ai/keys",
+    note: "9 个模型",
+  },
+  kie: {
+    placeholder: "Kie.ai API Key",
+    keyUrl: "https://kie.ai/api-key",
+    note: "Claude、GPT、Gemini、Kimi",
+  },
+};
 
 export default function StepSelect({
   samples,
   image,
   imageName,
   scorable,
+  gateway,
   apiKey,
   remember,
   onSelect,
+  onGateway,
   onKey,
   onRemember,
   onNext,
@@ -25,6 +43,8 @@ export default function StepSelect({
   image: ImageRef | null;
   imageName: string;
   scorable: boolean;
+  gateway: Gateway;
+  onGateway: (gateway: Gateway) => void;
   apiKey: string;
   remember: boolean;
   onSelect: (image: ImageRef, name: string, scorable: boolean) => void;
@@ -125,17 +145,36 @@ export default function StepSelect({
           </label>
           <ErrorMessage message={error} />
           <div className="api-key-field">
+            <div
+              className="vision-gateway"
+              role="radiogroup"
+              aria-label="模型通道"
+            >
+              {(Object.keys(GATEWAY_NAMES) as Gateway[]).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  role="radio"
+                  aria-checked={gateway === g}
+                  className={gateway === g ? "active" : ""}
+                  onClick={() => onGateway(g)}
+                >
+                  <strong>{GATEWAY_NAMES[g]}</strong>
+                  <small>{GATEWAY_INFO[g].note}</small>
+                </button>
+              ))}
+            </div>
             <label htmlFor="vision-key">
               <KeyRound size={13} />
-              OpenRouter Key
+              {GATEWAY_NAMES[gateway]} Key
             </label>
             <input
               id="vision-key"
-              aria-label="OpenRouter Key"
+              aria-label={`${GATEWAY_NAMES[gateway]} Key`}
               type="password"
               autoComplete="off"
               spellCheck={false}
-              placeholder="sk-or-…"
+              placeholder={GATEWAY_INFO[gateway].placeholder}
               value={apiKey}
               onChange={(e) => onKey(e.target.value)}
             />
@@ -148,8 +187,9 @@ export default function StepSelect({
               在本浏览器记住
             </label>
             <p className="field-help">
-              Key 只随请求发送给 OpenRouter，不会保存在服务器或导出文件中。
-              <ExternalLink href="https://openrouter.ai/keys">
+              Key 只随请求发送给 {GATEWAY_NAMES[gateway]}
+              ，不会保存在服务器或导出文件中。
+              <ExternalLink href={GATEWAY_INFO[gateway].keyUrl}>
                 获取 Key
               </ExternalLink>
             </p>
