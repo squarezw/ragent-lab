@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
 from typing import Literal
 
 import httpx
+
+log = logging.getLogger(__name__)
 
 URL = 'https://openrouter.ai/api/v1/chat/completions'
 TIMEOUT_SECONDS = 600.0
@@ -107,11 +110,44 @@ def _body(model: dict, messages: list[dict], schema_name: str, schema: dict) -> 
 
 
 _STATUS_ERRORS = {
-    401: ('auth', 'OpenRouter Key 无效或已撤销。'),
-    403: ('auth', 'OpenRouter Key 无效或已撤销。'),
-    402: ('credits', 'OpenRouter 余额不足。'),
-    429: ('rate_limit', '请求过于频繁或被上游限流，请稍后重试。'),
+    401: ('auth', 'OpenRouter Key 无效或已撤销'),
+    402: ('credits', 'OpenRouter 余额不足'),
+    429: ('rate_limit', '请求过于频繁或被上游限流，请稍后重试'),
 }
+_KEY_LIKE = re.compile(r'sk-[A-Za-z0-9_-]{8,}')
+_DETAIL_MAX = 300
+
+
+def _upstream_detail(resp: httpx.Response, api_key: str) -> str:
+    """OpenRouter's own error text (message, provider, raw reason) with keys removed."""
+    try:
+        err = resp.json().get('error') or {}
+    except (ValueError, AttributeError):
+        return ''
+    if not isinstance(err, dict):
+        return ''
+    parts = [str(err.get('message') or '')]
+    meta = err.get('metadata')
+    if isinstance(meta, dict):
+        if meta.get('provider_name'):
+            parts.append(f"服务商 {meta['provider_name']}")
+        for k in ('raw', 'reasons'):
+            if meta.get(k):
+                v = meta[k]
+                parts.append(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
+    text = ' · '.join(p.strip() for p in parts if p and p.strip())
+    if api_key:
+        text = text.replace(api_key, '***')
+    text = _KEY_LIKE.sub('***', text)
+    return text[:_DETAIL_MAX]
+
+
+def _status_error(resp: httpx.Response, api_key: str, model_id: str) -> OpenRouterError:
+    detail = _upstream_detail(resp, api_key)
+    kind, msg = _STATUS_ERRORS.get(
+        resp.status_code, ('upstream', f'OpenRouter 拒绝了请求（HTTP {resp.status_code}）'))
+    log.warning('openrouter %s HTTP %s: %s', model_id, resp.status_code, detail or '-')
+    return OpenRouterError(kind, f'{msg}：{detail}' if detail else f'{msg}。')
 
 
 async def chat_json(api_key: str, model: dict, messages: list[dict],
@@ -132,11 +168,8 @@ async def chat_json(api_key: str, model: dict, messages: list[dict],
         raise OpenRouterError('upstream', f'网络错误：{type(exc).__name__}。') from None
     elapsed_ms = (time.perf_counter() - started) * 1000
 
-    if resp.status_code in _STATUS_ERRORS:
-        kind, msg = _STATUS_ERRORS[resp.status_code]
-        raise OpenRouterError(kind, msg)
     if resp.status_code >= 400:
-        raise OpenRouterError('upstream', f'上游服务出错（HTTP {resp.status_code}）。')
+        raise _status_error(resp, api_key, model['id'])
 
     try:
         data = resp.json()

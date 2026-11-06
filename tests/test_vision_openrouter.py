@@ -103,6 +103,26 @@ class OpenRouterTests(unittest.TestCase):
                 self.assertNotIn(KEY, str(err))
                 self.assertNotIn(KEY, err.message)
 
+    def test_upstream_reason_is_shown_without_key(self):
+        body = {'error': {'code': 403, 'message': 'Provider refused: ' + KEY,
+                          'metadata': {'provider_name': 'Anthropic',
+                                       'raw': 'blocked for sk-or-v1-abcdef123456'}}}
+        with self.assertLogs('ragent_lab.vision.openrouter', level='WARNING') as logs, \
+                self.assertRaises(OpenRouterError) as cm:
+            run_call(lambda r: httpx.Response(403, json=body))
+        err = cm.exception
+        self.assertEqual(err.kind, 'upstream')
+        self.assertIn('HTTP 403', err.message)
+        self.assertIn('Provider refused', err.message)
+        self.assertIn('Anthropic', err.message)
+        for text in (err.message, '\n'.join(logs.output)):
+            self.assertNotIn(KEY, text)
+            self.assertNotIn('sk-or-v1-abcdef123456', text)
+        with self.assertRaises(OpenRouterError) as cm:
+            run_call(lambda r: httpx.Response(401, json={'error': {'message': 'No auth credentials found'}}))
+        self.assertEqual(cm.exception.kind, 'auth')
+        self.assertIn('No auth credentials found', cm.exception.message)
+
     def test_prices(self):
         registry._price_cache.update(at=0.0, data=None)
         openrouter.transport = httpx.MockTransport(lambda r: httpx.Response(200, json={'data': [
