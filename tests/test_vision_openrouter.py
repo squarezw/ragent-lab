@@ -41,6 +41,8 @@ class OpenRouterTests(unittest.TestCase):
         self.assertEqual(get_model('minimax/minimax-m3')['reasoning'], {'enabled': False})
         self.assertEqual(JUDGE_MODEL['provider'],
                          {'order': ['anthropic'], 'allow_fallbacks': False})
+        self.assertEqual(get_model('anthropic/claude-opus-5.5')['provider'], JUDGE_MODEL['provider'])
+        self.assertIsNone(get_model('qwen/qwen3.8-max-prime')['provider'])
         with self.assertRaises(KeyError):
             get_model('nope')
 

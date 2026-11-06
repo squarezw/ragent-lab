@@ -20,9 +20,11 @@ def _m(id, name, family, response_format, max_tokens=32000, temperature=0.2,
 
 
 _SCHEMA = 'supported_parameters 含 structured_outputs'
+_ANTHROPIC_ONLY = {'order': ['anthropic'], 'allow_fallbacks': False}
 VISION_MODELS: list[dict] = [
     _m('anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'anthropic', 'json_schema',
-       temperature=None, notes=_SCHEMA + '；不支持 temperature'),
+       temperature=None, provider=_ANTHROPIC_ONLY,
+       notes=_SCHEMA + '；不支持 temperature；锁定 Anthropic 服务商'),
     _m('openai/gpt-6-astra', 'GPT-6 Astra', 'openai', 'json_schema',
        temperature=None, notes=_SCHEMA + '；不支持 temperature'),
     _m('google/gemini-4-argon', 'Gemini 4 Argon', 'google', 'json_schema', notes=_SCHEMA),
@@ -40,7 +42,7 @@ VISION_MODELS: list[dict] = [
 
 JUDGE_MODEL: dict = _m(
     'anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'anthropic', 'json_schema',
-    temperature=None, provider={'order': ['anthropic'], 'allow_fallbacks': False},
+    temperature=None, provider=_ANTHROPIC_ONLY,
     notes='判定模型，锁定 Anthropic 服务商')
 
 

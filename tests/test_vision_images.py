@@ -134,6 +134,16 @@ class SampleTests(unittest.TestCase):
             vi.reset_samples_cache()
         self.assertEqual(vi.load_samples(Path(tmp) / 'missing'), [])
 
+    def test_committed_demo_sample_loads(self):
+        root = Path(__file__).resolve().parent / 'fixtures' / 'vision-samples'
+        samples = vi.load_samples(root)
+        self.assertEqual([s.id for s in samples], ['demo_plate'])
+        demo = samples[0]
+        self.assertEqual(demo.rubric.rubric_status, 'approved')
+        self.assertEqual([i.id for i in demo.rubric.items],
+                         ['D01', 'D02', 'D03', 'D04', 'D05', 'D06'])
+        self.assertEqual((demo.image.width, demo.image.height), (1100, 720))
+
 
 if __name__ == '__main__':
     unittest.main()

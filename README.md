@@ -118,7 +118,9 @@ vision-samples/
 
 `rubric_status` 为 `approved` 时才打分；为 `draft` 时，这张图按没有标准答案处理，只显示一致性。`image` 必须位于样例文件夹内。
 
-本机调试：
+仓库里只带一个自绘的简单示例 `tests/fixtures/vision-samples/demo_plate/`（120×60 板、φ20 中心孔、2-φ8，带已审定细则），供测试和本机调试使用；重新生成图片：`python tests/fixtures/vision-samples/make_demo_plate.py`。
+
+本机调试（用仓库示例：`VISION_SAMPLES_DIR=tests/fixtures/vision-samples`；用真实测试图：）：
 
 ```bash
 VISION_SAMPLES_DIR=~/Documents/AI/ragent-lab-vision-samples python -m uvicorn ragent_lab.api.app:app --app-dir src --reload --port 8000
