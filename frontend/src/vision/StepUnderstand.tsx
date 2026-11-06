@@ -60,6 +60,8 @@ export default function StepUnderstand({
   runs,
   scorable,
   consensus,
+  judge,
+  onJudge,
   error,
   onToggle,
   onToggleAll,
@@ -76,6 +78,8 @@ export default function StepUnderstand({
   runs: Record<string, RunEntry>;
   scorable: boolean;
   consensus?: ConsensusEntry;
+  judge: string;
+  onJudge: (model: string) => void;
   error: string;
   onToggle: (id: string) => void;
   onToggleAll: (all: boolean) => void;
@@ -101,10 +105,24 @@ export default function StepUnderstand({
   return (
     <>
       <div className="vision-toolbar">
-        <p className="vision-judge-note">
+        <div className="vision-judge-note">
           <Scale size={14} />
-          判定由 Claude Opus 5.5 完成，费用计入你的 Key
-        </p>
+          <label htmlFor="vision-judge">评判模型</label>
+          <select
+            id="vision-judge"
+            value={judge}
+            onChange={(e) => onJudge(e.target.value)}
+          >
+            {(models.length ? models : [{ id: judge, name: judge }]).map(
+              (m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ),
+            )}
+          </select>
+          <span>打分和一致性对照都用它，费用计入你的 Key</span>
+        </div>
         <div>
           <button
             type="button"

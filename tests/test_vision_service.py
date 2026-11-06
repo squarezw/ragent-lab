@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from ragent_lab.vision import prompts, service
 from ragent_lab.vision.images import PreparedImage
 from ragent_lab.vision.openrouter import CallResult, OpenRouterError
-from ragent_lab.vision.registry import JUDGE_MODEL
+from ragent_lab.vision.registry import JUDGE_MODEL, get_model, judge_model
 from ragent_lab.vision.schema import Judgement, Rubric
 
 KEY = 'sk-secret-test-key'
@@ -115,6 +115,23 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out['counts'], {'correct': 2, 'uncertain': 0, 'wrong': 1})
         self.assertEqual([j['item_id'] for j in out['judgements']], ['C01', 'C02', 'C03'])
         self.assertIn('meta', out)
+
+        qwen = get_model('qwen/qwen3.8-max-prime')
+        with mock.patch.object(service, 'chat_json', fake(content, calls)):
+            await service.score(KEY, RUBRIC, UNDERSTANDING, qwen)
+        with mock.patch.object(service, 'chat_json', fake({'groups': []}, calls)):
+            await service.consensus(KEY, [{'model_name': 'A', 'understanding': UNDERSTANDING},
+                                          {'model_name': 'B', 'understanding': UNDERSTANDING}],
+                                    qwen)
+        self.assertIs(calls[1]['model'], qwen)
+        self.assertIs(calls[2]['model'], qwen)
+
+    def test_judge_model_lookup(self):
+        self.assertIs(judge_model(None), JUDGE_MODEL)
+        self.assertIs(judge_model('anthropic/claude-opus-5.5'), JUDGE_MODEL)
+        self.assertIs(judge_model('qwen/qwen3.8-max-prime'), get_model('qwen/qwen3.8-max-prime'))
+        with self.assertRaises(KeyError):
+            judge_model('x/unknown')
 
     async def test_score_wraps_data_in_delimiters(self):
         calls = []

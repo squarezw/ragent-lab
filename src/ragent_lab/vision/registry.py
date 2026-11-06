@@ -53,6 +53,13 @@ def get_model(model_id: str) -> dict:
     raise KeyError(model_id)
 
 
+def judge_model(model_id: str | None = None) -> dict:
+    """Judge for scoring and consensus: Claude by default, or any registered model."""
+    if model_id is None or model_id == JUDGE_MODEL['id']:
+        return JUDGE_MODEL
+    return get_model(model_id)
+
+
 async def model_prices(client_factory=None) -> dict[str, dict | None]:
     now = time.time()
     if _price_cache['data'] is not None and now - _price_cache['at'] < _PRICE_TTL:

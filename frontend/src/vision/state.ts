@@ -164,6 +164,26 @@ export function importState(text: string): VisionState {
 }
 
 const KEY_NAME = "vision-openrouter-key";
+const JUDGE_NAME = "vision-judge-model";
+export const DEFAULT_JUDGE = "anthropic/claude-opus-5.5";
+
+export const judgeStorage = {
+  load(): string {
+    try {
+      return localStorage.getItem(JUDGE_NAME) || DEFAULT_JUDGE;
+    } catch {
+      return DEFAULT_JUDGE;
+    }
+  },
+  save(model: string): void {
+    try {
+      if (model === DEFAULT_JUDGE) localStorage.removeItem(JUDGE_NAME);
+      else localStorage.setItem(JUDGE_NAME, model);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+};
 
 export const keyStorage = {
   load(): string {

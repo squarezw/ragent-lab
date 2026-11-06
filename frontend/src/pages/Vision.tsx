@@ -8,9 +8,11 @@ import {
   type SubmitKind,
 } from "../vision/client";
 import {
+  DEFAULT_JUDGE,
   exportState,
   importState,
   initialState,
+  judgeStorage,
   keyStorage,
   reducer,
 } from "../vision/state";
@@ -50,6 +52,7 @@ export default function Vision() {
   const [selected, setSelected] = useState<string[]>([]);
   const [apiKey, setApiKey] = useState(() => keyStorage.load());
   const [remember, setRemember] = useState(() => keyStorage.load() !== "");
+  const [judgePick, setJudgePick] = useState(() => judgeStorage.load());
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
   // Every in-flight poll listens to this controller; replaced on re-select / import, aborted on unmount.
@@ -81,6 +84,18 @@ export default function Vision() {
     setRemember(keep);
     keyStorage.save(key, keep);
   }
+  // A remembered judge may have left the registry: fall back to the default, then the first model.
+  const listed = (id: string) => models.some((m) => m.id === id);
+  const judge =
+    !models.length || listed(judgePick)
+      ? judgePick
+      : listed(DEFAULT_JUDGE)
+        ? DEFAULT_JUDGE
+        : models[0].id;
+  function changeJudge(model: string) {
+    setJudgePick(model);
+    judgeStorage.save(model);
+  }
   function requireKey(): boolean {
     if (apiKey.trim()) return true;
     setActionError(NEED_KEY);
@@ -101,7 +116,12 @@ export default function Vision() {
     try {
       const result = await runJob<ScoreResult>(
         "score",
-        { sample_id: image.id, understanding, api_key: apiKey },
+        {
+          sample_id: image.id,
+          understanding,
+          judge_model: judge,
+          api_key: apiKey,
+        },
         signal,
       );
       if (!signal.aborted)
@@ -200,7 +220,7 @@ export default function Vision() {
     try {
       const result = await runJob<ConsensusResult>(
         "consensus",
-        { results, api_key: apiKey },
+        { results, judge_model: judge, api_key: apiKey },
         signal,
       );
       if (!signal.aborted)
@@ -341,6 +361,8 @@ export default function Vision() {
           runs={state.runs}
           scorable={state.scorable && state.image?.kind === "sample"}
           consensus={state.consensus}
+          judge={judge}
+          onJudge={changeJudge}
           error={actionError}
           onToggle={(id) =>
             setSelected((cur) =>
