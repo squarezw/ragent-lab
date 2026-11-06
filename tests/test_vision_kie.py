@@ -25,10 +25,36 @@ KIMI = get_model('moonshotai/kimi-k3.1-pro')
 
 def run_call(handler, model):
     kie.transport = httpx.MockTransport(handler)
+    delays, kie.RETRY_DELAYS = kie.RETRY_DELAYS, (0.0, 0.0)
     try:
         return asyncio.run(kie.chat_json(KEY, model, MSGS, 'out', SCHEMA))
     finally:
         kie.transport = None
+        kie.RETRY_DELAYS = delays
+
+
+def sse(*events, done=False):
+    """An event-stream response; events are dicts (sent as data: lines) or raw strings."""
+    lines = []
+    for ev in events:
+        if isinstance(ev, str):
+            lines.append(ev)
+        else:
+            lines += [f"event: {ev.get('type', 'message')}", 'data: ' + json.dumps(ev), '']
+    if done:
+        lines += ['data: [DONE]', '']
+    return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+                          content='\n'.join(lines).encode())
+
+
+def sequence(*responses):
+    """Handler returning the given responses in order, recording each request."""
+    seen, queue = [], list(responses)
+
+    def handler(req):
+        seen.append(req)
+        return queue.pop(0)
+    return seen, handler
 
 
 def recorder(response):
@@ -63,7 +89,7 @@ class KieCallTests(unittest.TestCase):
         self.assertEqual(req.headers['Authorization'], f'Bearer {KEY}')
         body = json.loads(req.content)
         self.assertEqual(body['model'], 'claude-opus-5-5')
-        self.assertIs(body['stream'], False)
+        self.assertIs(body['stream'], True)
         self.assertEqual(body['max_tokens'], CLAUDE['max_tokens'])
         image, text, suffix = body['messages'][0]['content']
         self.assertEqual(image, {'type': 'image', 'source': {
@@ -85,7 +111,7 @@ class KieCallTests(unittest.TestCase):
                 self.assertEqual(seen[0].url.path, path)
                 body = json.loads(seen[0].content)
                 self.assertEqual(body['model'], wire)
-                self.assertIs(body['stream'], False)
+                self.assertIs(body['stream'], True)
                 self.assertEqual(body['input'][0]['content'], [
                     {'type': 'input_image', 'image_url': f'data:image/png;base64,{B64}'},
                     {'type': 'input_text', 'text': '读图'}])
@@ -102,8 +128,11 @@ class KieCallTests(unittest.TestCase):
         self.assertEqual(seen[0].url.path, '/gemini-4-argon-openai/v1/chat/completions')
         body = json.loads(seen[0].content)
         self.assertNotIn('model', body)
-        self.assertEqual(body['messages'], MSGS)
-        self.assertEqual(body['response_format']['json_schema']['schema'], SCHEMA)
+        # Kie.ai rejects schemas with a property named "type", so none is sent on this route.
+        self.assertNotIn('response_format', body)
+        content = body['messages'][0]['content']
+        self.assertEqual(content[:2], MSGS[0]['content'])
+        self.assertIn('JSON', content[2]['text'])
         self.assertEqual((r.content, r.credits, r.usage), ({'a': 3}, 0.01, {'total_tokens': 9}))
 
     def test_truncation_per_format(self):
@@ -157,6 +186,94 @@ class KieCallTests(unittest.TestCase):
     def test_model_without_kie_route(self):
         with self.assertRaises(OpenRouterError):
             run_call(lambda r: httpx.Response(200, json={}), get_model('qwen/qwen3.8-max-prime'))
+
+
+
+class KieStreamTests(unittest.TestCase):
+    def test_responses_stream(self):
+        # Shapes recorded from Kie.ai's Kimi / GPT routes.
+        resp = sse(
+            {'type': 'response.created'},
+            {'type': 'response.reasoning_text.delta', 'delta': 'thinking'},
+            {'type': 'response.output_text.delta', 'delta': '{"a": '},
+            {'type': 'response.output_text.delta', 'delta': '5}'},
+            {'type': 'response.completed', 'credits_consumed': 13.8, 'response': {
+                'status': 'completed', 'model': 'kimi-k3-1-pro',
+                'usage': {'output_tokens': 17126}}})
+        r = run_call(lambda req: resp, KIMI)
+        self.assertEqual((r.content, r.credits, r.model), ({'a': 5}, 13.8, 'kimi-k3-1-pro'))
+        self.assertEqual(r.usage, {'output_tokens': 17126})
+
+    def test_chat_stream(self):
+        # Shapes recorded from Kie.ai's Gemini route: credits and usage on the last chunk.
+        resp = sse(
+            {'object': 'chat.completion.chunk', 'model': 'gemini-4-argon',
+             'choices': [{'delta': {'content': '{"a"'}, 'index': 0}]},
+            {'object': 'chat.completion.chunk',
+             'choices': [{'delta': {'content': ': 6}'}, 'finish_reason': 'stop', 'index': 0}]},
+            {'object': 'chat.completion.chunk', 'choices': [], 'credits_consumed': 2.85,
+             'usage': {'total_tokens': 7094}}, done=True)
+        r = run_call(lambda req: resp, GEMINI)
+        self.assertEqual((r.content, r.credits, r.usage), ({'a': 6}, 2.85, {'total_tokens': 7094}))
+
+    def test_anthropic_stream(self):
+        resp = sse(
+            {'type': 'message_start', 'message': {'model': 'claude-opus-5-5',
+                                                  'usage': {'input_tokens': 9}}},
+            {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text'}},
+            {'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': '{"a": 7}'}},
+            {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn'},
+             'usage': {'output_tokens': 4}},
+            {'type': 'message_stop', 'credits_consumed': 0.75})
+        r = run_call(lambda req: resp, CLAUDE)
+        self.assertEqual((r.content, r.credits, r.finish_reason), ({'a': 7}, 0.75, 'end_turn'))
+        self.assertEqual(r.usage, {'input_tokens': 9, 'output_tokens': 4})
+
+    def test_anthropic_stream_truncated(self):
+        resp = sse({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': '{"a":'}},
+                   {'type': 'message_delta', 'delta': {'stop_reason': 'max_tokens'}},
+                   {'type': 'message_stop'})
+        with self.assertRaises(OpenRouterError) as cm:
+            run_call(lambda req: resp, CLAUDE)
+        self.assertEqual(cm.exception.kind, 'truncated')
+
+    def test_transient_failures_are_retried(self):
+        ok = sse({'type': 'response.output_text.delta', 'delta': '{"a": 1}'},
+                 {'type': 'response.completed', 'response': {'status': 'completed'}})
+        cases = {
+            'overloaded 503': httpx.Response(503, json={'type': 'error', 'error': {
+                'type': 'api_error', 'message': 'Resources are tight, please try again later.'}}),
+            'cloudflare 524': httpx.Response(524, text='<!DOCTYPE html><html>timeout</html>'),
+            'mid-stream error': sse(
+                {'type': 'response.output_text.delta', 'delta': '{"a"'},
+                {'type': 'error', 'code': 'upstream_error',
+                 'message': 'The server is currently being maintained, please try again later~'}),
+            'stream cut off': sse({'type': 'response.output_text.delta', 'delta': '{"a"'}),
+        }
+        for label, first in cases.items():
+            with self.subTest(label):
+                seen, handler = sequence(first, ok)
+                with self.assertLogs('ragent_lab.vision.kie', level='WARNING'):
+                    r = run_call(handler, GPT)
+                self.assertEqual(r.content, {'a': 1})
+                self.assertEqual(len(seen), 2)
+
+    def test_gives_up_after_three_attempts(self):
+        busy = httpx.Response(503, json={'error': {'message': 'Resources are tight'}})
+        seen, handler = sequence(busy, busy, busy)
+        with self.assertLogs('ragent_lab.vision.kie', level='WARNING'), \
+                self.assertRaises(OpenRouterError) as cm:
+            run_call(handler, CLAUDE)
+        self.assertEqual(len(seen), 3)
+        self.assertIn('Resources are tight', cm.exception.message)
+        self.assertIn('已自动重试 2 次', cm.exception.message)
+
+    def test_client_errors_are_not_retried(self):
+        seen, handler = sequence(httpx.Response(401, json={'error': {'message': 'Unauthorized'}}))
+        with self.assertLogs('ragent_lab.vision.kie', level='WARNING'), \
+                self.assertRaises(OpenRouterError) as cm:
+            run_call(handler, CLAUDE)
+        self.assertEqual((cm.exception.kind, len(seen)), ('auth', 1))
 
 
 if __name__ == '__main__':
