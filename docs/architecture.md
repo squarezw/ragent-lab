@@ -55,4 +55,4 @@ API 不导入 Streamlit，不返回模型实例、函数或服务端密钥。验
 
 ## 扩展
 
-实验目录是前后端共享的发现入口。每个新实验增加独立页面和 API 模块。图像理解（`vision`）通过访客选择的通道（OpenRouter，或 Kie.ai：仅 Claude、GPT、Gemini、Kimi）调用视觉模型，Key 由访客在网页输入，请求体用 `gateway` 字段区分；Kie.ai 按积分计费，结果里记为 `credits`。长耗时的理解、打分、一致性和生成走内存任务队列（2 小时过期，不落盘），前端轮询 `/api/vision/jobs/{job_id}`。上传的图纸存在 `VISION_UPLOAD_DIR`（Docker 卷，默认 7 天过期）。内置样例和细则放在仓库外的 `VISION_SAMPLES_DIR`，格式见 README“图像理解样例”。
+实验目录是前后端共享的发现入口。每个新实验增加独立页面和 API 模块。图像理解（`vision`）通过访客选择的通道（OpenRouter，或 Kie.ai：仅 Claude、GPT、Gemini、Kimi）调用视觉模型，Key 由访客在网页输入，请求体用 `gateway` 字段区分；Kie.ai 按积分计费，结果里记为 `credits`。长耗时的理解、打分、一致性和生成走内存任务队列（2 小时过期，不落盘），前端轮询 `/api/vision/jobs/{job_id}`。上传的图纸存在 `VISION_UPLOAD_DIR`（Docker 卷，默认 7 天过期）。模型调用分三类：目录模型经 OpenRouter（`openrouter.py`）或 Kie.ai（`kie.py`）；服务器内置模型（`builtin.py`，env 配置、访问码解锁、按 IP 限次）和访客自定义接口都走通用流式客户端 `compat.py`，自定义地址先经 `netguard.py` 校验只能是公网 https。请求体里的 `model` / `judge` 是带来源的引用（`catalog` | `builtin` | `custom`）。内置样例和细则放在仓库外的 `VISION_SAMPLES_DIR`，格式见 README“图像理解样例”。

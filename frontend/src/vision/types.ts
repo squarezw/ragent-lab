@@ -19,6 +19,8 @@ export type VisionModel = {
   };
   price: { prompt: string | null; completion: string | null } | null;
   gateways?: Gateway[];
+  // Set for options built from the model settings (badge · price or host).
+  priceLabel?: string;
 };
 
 export type Sample = { id: string; name: string; scorable: boolean };

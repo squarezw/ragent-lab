@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import httpx
-from ragent_lab.vision import kie
+from ragent_lab.vision import compat, kie
 from ragent_lab.vision.openrouter import OpenRouterError
 from ragent_lab.vision.registry import gateways_of, get_model
 
@@ -24,13 +24,13 @@ KIMI = get_model('moonshotai/kimi-k3.1-pro')
 
 
 def run_call(handler, model):
-    kie.transport = httpx.MockTransport(handler)
-    delays, kie.RETRY_DELAYS = kie.RETRY_DELAYS, (0.0, 0.0)
+    compat.transport = httpx.MockTransport(handler)
+    delays, compat.RETRY_DELAYS = compat.RETRY_DELAYS, (0.0, 0.0)
     try:
         return asyncio.run(kie.chat_json(KEY, model, MSGS, 'out', SCHEMA))
     finally:
-        kie.transport = None
-        kie.RETRY_DELAYS = delays
+        compat.transport = None
+        compat.RETRY_DELAYS = delays
 
 
 def sse(*events, done=False):
@@ -167,7 +167,7 @@ class KieCallTests(unittest.TestCase):
             with self.subTest(kind=kind, text=text):
                 with self.assertRaises(OpenRouterError) as cm:
                     if logged:
-                        with self.assertLogs('ragent_lab.vision.kie', level='WARNING') as logs:
+                        with self.assertLogs('ragent_lab.vision.compat', level='WARNING') as logs:
                             run_call(lambda r, x=resp: x, CLAUDE)
                         self.assertNotIn(KEY, '\n'.join(logs.output))
                     else:
@@ -253,7 +253,7 @@ class KieStreamTests(unittest.TestCase):
         for label, first in cases.items():
             with self.subTest(label):
                 seen, handler = sequence(first, ok)
-                with self.assertLogs('ragent_lab.vision.kie', level='WARNING'):
+                with self.assertLogs('ragent_lab.vision.compat', level='WARNING'):
                     r = run_call(handler, GPT)
                 self.assertEqual(r.content, {'a': 1})
                 self.assertEqual(len(seen), 2)
@@ -261,7 +261,7 @@ class KieStreamTests(unittest.TestCase):
     def test_gives_up_after_three_attempts(self):
         busy = httpx.Response(503, json={'error': {'message': 'Resources are tight'}})
         seen, handler = sequence(busy, busy, busy)
-        with self.assertLogs('ragent_lab.vision.kie', level='WARNING'), \
+        with self.assertLogs('ragent_lab.vision.compat', level='WARNING'), \
                 self.assertRaises(OpenRouterError) as cm:
             run_call(handler, CLAUDE)
         self.assertEqual(len(seen), 3)
@@ -270,7 +270,7 @@ class KieStreamTests(unittest.TestCase):
 
     def test_client_errors_are_not_retried(self):
         seen, handler = sequence(httpx.Response(401, json={'error': {'message': 'Unauthorized'}}))
-        with self.assertLogs('ragent_lab.vision.kie', level='WARNING'), \
+        with self.assertLogs('ragent_lab.vision.compat', level='WARNING'), \
                 self.assertRaises(OpenRouterError) as cm:
             run_call(handler, CLAUDE)
         self.assertEqual((cm.exception.kind, len(seen)), ('auth', 1))

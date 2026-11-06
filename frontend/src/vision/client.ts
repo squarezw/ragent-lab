@@ -1,4 +1,5 @@
 import { api } from "../api";
+import type { BuiltinInfo } from "./modelSettings";
 import type {
   Geometry, ImageRef, Job, Sample, UploadedImage, VisionModel,
 } from "./types";
@@ -15,6 +16,9 @@ async function detailOf(response: Response): Promise<string> {
 
 export const listModels = () => api<VisionModel[]>("/vision/models");
 export const listSamples = () => api<Sample[]>("/vision/samples");
+export const listBuiltin = () => api<BuiltinInfo>("/vision/builtin");
+export const checkAccess = (access_code: string) =>
+  api<{ ok: boolean }>("/vision/access", { access_code });
 
 export async function uploadImage(file: File): Promise<UploadedImage> {
   const form = new FormData();

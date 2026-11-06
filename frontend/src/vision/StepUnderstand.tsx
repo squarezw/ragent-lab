@@ -64,7 +64,6 @@ export default function StepUnderstand({
   runs,
   scorable,
   consensus,
-  gateway,
   judge,
   onJudge,
   error,
@@ -83,7 +82,6 @@ export default function StepUnderstand({
   runs: Record<string, RunEntry>;
   scorable: boolean;
   consensus?: ConsensusEntry;
-  gateway: Gateway;
   judge: string;
   onJudge: (model: string) => void;
   error: string;
@@ -195,7 +193,7 @@ export default function StepUnderstand({
                 />
                 <span>
                   <strong>{m.name}</strong>
-                  <small>{formatPrice(m.price, gateway)}</small>
+                  <small>{m.priceLabel ?? formatPrice(m.price)}</small>
                 </span>
               </label>
             ))}

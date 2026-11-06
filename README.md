@@ -134,6 +134,27 @@ bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 
 上传图片上限 15 MB。上传的图纸存进 API 容器的 Docker 卷 `vision-uploads`（`VISION_UPLOAD_DIR=/data/vision-uploads`），重启和发版后仍在，`VISION_UPLOAD_TTL_HOURS`（默认 168，即 7 天）后自动删除，最多保留 `VISION_UPLOAD_MAX_FILES`（默认 2000）张；未设置 `VISION_UPLOAD_DIR` 时只存内存。服务器上找不到图片时，页面会用浏览器里的原文件自动重新上传一次。前端容器的 Nginx 已设置 `client_max_body_size 16m`；生产主机 Nginx 转发 `lab.ragents.net` 时，也必须允许不小于 16 MB 的请求体（`client_max_body_size 16m;` 或更大），否则上传会被主机 Nginx 以 413 拒绝。
 
+## 图像理解的模型设置
+
+侧栏底部的「模型设置」页决定图像理解页和评判模型里能选哪些模型。设置只存在访客浏览器的 localStorage 里（可选择不保存 Key），服务器不保存任何访客 Key。
+
+- **代理平台**：填 OpenRouter / Kie.ai 的 Key，并为模型目录里的每个模型选择经哪个平台调用（Kie.ai 只提供 Claude、GPT、Gemini、Kimi）。
+- **内置模型**：由服务器付费，配置在 API 的环境变量里，访客输入访问码后可用，每个 IP 每小时有调用上限。Key 和接口地址都不会发给浏览器。
+- **自定义模型**：访客自己填接口地址、模型名和 Key。预设可一键填好 OpenRouter、Kie.ai、DeepSeek、Moonshot（Kimi）、阿里云百炼（Qwen）、智谱（GLM）、OpenAI、Anthropic 的地址和格式；支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种格式。服务器只调用公网 https 地址，解析到本机或内网的地址会被拒绝，也不跟随重定向。
+
+内置模型的环境变量（见 [env.example](env.example)）：
+
+```bash
+LAB_ACCESS_CODE=choose-a-long-random-code   # 不设置则不开放内置模型
+VISION_BUILTIN_PER_HOUR=60                   # 每个访客 IP 每小时的调用次数
+DEEPSEEK_API_KEY=sk-...
+VISION_BUILTIN_MODELS='[{"id":"deepseek","name":"DeepSeek（内置）","api":"chat",
+  "url":"https://api.deepseek.com/chat/completions","model":"<视觉模型名>",
+  "key_env":"DEEPSEEK_API_KEY","json":"object"}]'
+```
+
+每个条目：`id`（小写短名）、`name`、`api`（`chat` | `responses` | `anthropic`）、`url`（https）、`model`、`key_env`（存放 Key 的环境变量名）、`json`（`schema` | `object` | `prompt`，默认 `prompt`）、`auth`（`bearer` | `x-api-key`）、`max_tokens`、`notes`（显示在设置页）。缺 Key 或格式不对的条目会被跳过并写入日志。改完 `.env` 后重启 API 容器生效。
+
 ## GitHub Actions CI/CD
 
 配置文件：[.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml)。

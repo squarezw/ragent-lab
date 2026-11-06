@@ -2973,3 +2973,113 @@ main {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- model settings ---------------------------------------------------- */
+.models-page {
+  display: grid;
+  gap: 18px;
+}
+.models-page .panel .parameter-grid {
+  margin-bottom: 4px;
+}
+.models-page code {
+  font-family: var(--mono);
+  font-size: 10px;
+  background: #f1f5ea;
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin: 0 3px;
+}
+.models-page small.mono,
+.custom-model small.mono {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: #87977d;
+  overflow-wrap: anywhere;
+}
+.models-page .vision-table select {
+  border: 1px solid #dde5d7;
+  border-radius: 6px;
+  background: #fcfdf9;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: #47603f;
+  width: auto;
+  height: auto;
+}
+.access-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.access-row > div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.access-row .button {
+  margin-bottom: 2px;
+}
+.field-help.ok {
+  color: #3d8957;
+}
+.field-help.warn {
+  color: #9a6a1f;
+}
+.model-toggle-list,
+.custom-model-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.custom-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid #e1e7d9;
+  border-radius: 8px;
+  background: #fcfdf9;
+}
+.custom-model small.mono {
+  grid-column: 1;
+}
+.custom-model > span {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  gap: 6px;
+}
+.model-form {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px dashed #c6d7b6;
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+.model-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.model-summary > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #2f4a2a;
+}
+.sidebar-settings {
+  margin-bottom: 14px;
+}
+@media (max-width: 600px) {
+  .model-form .parameter-grid,
+  .models-page .parameter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

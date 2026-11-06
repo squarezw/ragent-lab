@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Literal
+from typing import Annotated, Literal, Union
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from ..vision import render, service
+from ..vision import netguard, render, service
+from ..vision.builtin import builtins
 from ..vision.images import (MAX_UPLOAD_BYTES, ImageRejected, PreparedImage, get_sample,
                              images, load_samples, prepare_image)
 from ..vision.openrouter import OpenRouterError
@@ -29,9 +30,41 @@ class _Body(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+class CatalogRef(_Body):
+    """A registry model, called through a proxy platform with the visitor's key."""
+    source: Literal['catalog']
+    id: str
+    gateway: Literal['openrouter', 'kie'] = 'openrouter'
+    api_key: SecretStr = SecretStr('')
+
+
+class BuiltinRef(_Body):
+    """A model configured on the server (env); its key never leaves the server."""
+    source: Literal['builtin']
+    id: str
+
+
+class CustomRef(_Body):
+    """A visitor-defined endpoint: any public https URL speaking one of the wire formats."""
+    source: Literal['custom']
+    name: str = Field(min_length=1, max_length=60)
+    api: Literal['chat', 'responses', 'anthropic'] = 'chat'
+    url: str = Field(min_length=9, max_length=500)
+    model: str = Field(default='', max_length=200)
+    json_mode: Literal['schema', 'object', 'prompt'] = 'prompt'
+    auth: Literal['bearer', 'x-api-key'] = 'bearer'
+    max_tokens: int = Field(default=16000, ge=1000, le=128000)
+    api_key: SecretStr = SecretStr('')
+
+
+ModelRef = Annotated[Union[CatalogRef, BuiltinRef, CustomRef], Field(discriminator='source')]
+
+
 class _Keyed(_Body):
+    # Legacy fields, used when `model` / `judge_model` are plain catalog ids.
     api_key: SecretStr = SecretStr('')
     gateway: Literal['openrouter', 'kie'] = 'openrouter'
+    access_code: SecretStr = SecretStr('')
 
 
 class ImageRef(_Body):
@@ -41,7 +74,7 @@ class ImageRef(_Body):
 
 class UnderstandBody(_Keyed):
     image: ImageRef
-    model: str
+    model: str | ModelRef
 
 
 class GenerateBody(UnderstandBody):
@@ -52,6 +85,7 @@ class ScoreBody(_Keyed):
     sample_id: str
     understanding: Understanding
     judge_model: str | None = None
+    judge: ModelRef | None = None
 
 
 class ConsensusItem(_Body):
@@ -60,8 +94,9 @@ class ConsensusItem(_Body):
 
 
 class ConsensusBody(_Keyed):
-    results: list[ConsensusItem] = Field(min_length=2, max_length=9)
+    results: list[ConsensusItem] = Field(min_length=2, max_length=26)
     judge_model: str | None = None
+    judge: ModelRef | None = None
 
 
 class ExportBody(_Body):
@@ -110,6 +145,60 @@ def _judge(model_id: str | None, gateway: str = 'openrouter') -> dict:
     return judge
 
 
+def _client_ip(request: Request) -> str:
+    # The API is only reachable through the web container's Nginx, which sets X-Real-IP.
+    return request.headers.get('x-real-ip') or (request.client.host if request.client else '-')
+
+
+def _ref_key(ref, gateway: str) -> str:
+    key = ref.api_key.get_secret_value().strip()
+    if not key:
+        raise HTTPException(422, f'请填写 {gateway} Key')
+    return key
+
+
+async def _resolve(ref, body: _Keyed, request: Request, judge: bool = False):
+    """Turn a model reference into (model dict, gateway, api key), checking access."""
+    if isinstance(ref, str) or ref is None:  # legacy: catalog id + body.gateway / api_key
+        if judge:
+            model = _judge(ref, body.gateway)
+        else:
+            _check_model(ref, body.gateway)
+            model = get_model(ref)
+        return model, body.gateway, _key(body)
+    if isinstance(ref, CatalogRef):
+        if judge:
+            model = _judge(ref.id, ref.gateway)
+        else:
+            _check_model(ref.id, ref.gateway)
+            model = get_model(ref.id)
+        return model, ref.gateway, _ref_key(ref, GATEWAY_NAMES[ref.gateway])
+    if isinstance(ref, BuiltinRef):
+        model = builtins.models.get(ref.id) if builtins.enabled else None
+        if model is None:
+            raise HTTPException(422, '该内置模型不可用')
+        ip = _client_ip(request)
+        if not builtins.check_code(body.access_code.get_secret_value().strip(), ip):
+            raise HTTPException(403, '访问码不正确，无法使用内置模型')
+        if not builtins.take(ip):
+            raise HTTPException(429, f'内置模型每小时最多调用 {builtins.per_hour} 次，请稍后再试')
+        return model, 'builtin', model['api_key']
+    # CustomRef
+    try:
+        host = await run_in_threadpool(netguard.check_public_https, ref.url)
+    except netguard.UnsafeURL as exc:
+        raise HTTPException(422, str(exc)) from None
+    key = _ref_key(ref, ref.name)
+    model = {
+        'id': f'custom:{ref.name}', 'name': ref.name, 'max_tokens': ref.max_tokens,
+        'temperature': None, 'reasoning': None,
+        'endpoint': {'api': ref.api, 'url': ref.url.strip(), 'model': ref.model.strip() or None,
+                     'json': ref.json_mode, 'auth': ref.auth, 'label': host,
+                     'public_only': True},
+    }
+    return model, 'custom', key
+
+
 def _png(image: PreparedImage | None) -> Response:
     if image is None:
         raise HTTPException(404, IMAGE_GONE)
@@ -132,6 +221,26 @@ async def models():
 @router.get('/judge')
 def judge():
     return {'id': JUDGE_MODEL['id'], 'name': JUDGE_MODEL['name']}
+
+
+@router.get('/builtin')
+def builtin_models():
+    """Built-in models (names only) and whether they are offered at all."""
+    return {'enabled': builtins.enabled, 'per_hour': builtins.per_hour,
+            'models': builtins.public_list()}
+
+
+class AccessBody(_Body):
+    access_code: SecretStr
+
+
+@router.post('/access')
+def check_access(body: AccessBody, request: Request):
+    if not builtins.enabled:
+        raise HTTPException(422, '服务器未开放内置模型')
+    if not builtins.check_code(body.access_code.get_secret_value().strip(), _client_ip(request)):
+        raise HTTPException(403, '访问码不正确')
+    return {'ok': True}
 
 
 @router.get('/samples')
@@ -169,25 +278,22 @@ async def upload_image(file: UploadFile = File(...)):
 
 
 @router.post('/understand')
-async def understand(body: UnderstandBody):
-    key, gateway = _key(body), body.gateway
-    _check_model(body.model, body.gateway)
+async def understand(body: UnderstandBody, request: Request):
     image = _resolve_image(body.image)
-    model_id = body.model
+    model, gateway, key = await _resolve(body.model, body, request)
 
     async def factory():
-        return await service.understand(key, model_id, image, gateway)
-    return _job('understand', get_model(model_id)['name'], factory)
+        return await service.understand(key, model, image, gateway)
+    return _job('understand', model['name'], factory)
 
 
 @router.post('/score')
-async def score(body: ScoreBody):
-    key, gateway = _key(body), body.gateway
+async def score(body: ScoreBody, request: Request):
     sample = get_sample(body.sample_id)
     if sample is None or sample.rubric is None or sample.rubric.rubric_status != 'approved' \
             or not sample.rubric.items:
         raise HTTPException(422, '该样例没有可用的评分细则')
-    judge = _judge(body.judge_model, body.gateway)
+    judge, gateway, key = await _resolve(body.judge or body.judge_model, body, request, judge=True)
     rubric, understanding = sample.rubric, body.understanding.model_dump()
 
     async def factory():
@@ -196,9 +302,8 @@ async def score(body: ScoreBody):
 
 
 @router.post('/consensus')
-async def consensus(body: ConsensusBody):
-    key, gateway = _key(body), body.gateway
-    judge = _judge(body.judge_model, body.gateway)
+async def consensus(body: ConsensusBody, request: Request):
+    judge, gateway, key = await _resolve(body.judge or body.judge_model, body, request, judge=True)
     results = [{'model_name': r.model_name, 'understanding': r.understanding.model_dump()}
                for r in body.results]
 
@@ -208,21 +313,20 @@ async def consensus(body: ConsensusBody):
 
 
 @router.post('/generate')
-async def generate(body: GenerateBody):
-    key, gateway = _key(body), body.gateway
-    _check_model(body.model, body.gateway)
+async def generate(body: GenerateBody, request: Request):
     image = _resolve_image(body.image)
-    model_id, understanding = body.model, body.understanding
+    understanding = body.understanding
+    model, gateway, key = await _resolve(body.model, body, request)
 
     async def factory():
-        out = await service.generate(key, model_id, image, understanding.model_dump(), gateway)
+        out = await service.generate(key, model, image, understanding.model_dump(), gateway)
         geometry = Geometry.model_validate(out['geometry'])
         try:
             rendered = await bounded_render('generate', render.render_all, geometry, understanding)
         except RenderBusy:
             raise OpenRouterError('timeout', RENDER_BUSY) from None
         return {'geometry': out['geometry'], **rendered, 'meta': out['meta']}
-    return _job('generate', get_model(model_id)['name'], factory)
+    return _job('generate', model['name'], factory)
 
 
 RENDER_BUSY = '导出繁忙或超时，请稍后重试。'
