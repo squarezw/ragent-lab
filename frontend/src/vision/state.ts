@@ -56,6 +56,7 @@ export const initialState: VisionState = {
 
 export type Action =
   | { type: "selectImage"; image: ImageRef; imageName: string; scorable: boolean }
+  | { type: "imageReplaced"; image: ImageRef }
   | { type: "setStep"; step: 1 | 2 | 3 }
   | { type: "runUpdate"; model: string; patch: Partial<RunEntry> }
   | { type: "scoreUpdate"; model: string; patch: Partial<RunEntry> }
@@ -77,6 +78,8 @@ export function reducer(state: VisionState, action: Action): VisionState {
         consensus: undefined,
         generations: [],
       };
+    case "imageReplaced":
+      return { ...state, image: action.image };
     case "setStep":
       return { ...state, step: action.step };
     case "runUpdate": {

@@ -1,6 +1,7 @@
 """Image preparation, in-memory store and sample loader tests."""
 import io
 import json
+import os
 import sys
 import tempfile
 import time
@@ -89,15 +90,16 @@ class LimitTests(unittest.TestCase):
 
 class StoreTests(unittest.TestCase):
     def _img(self, n):
-        return vi.PreparedImage(id=f'i{n}', png=b'x', width=1, height=1, sha256='s', source_name='n')
+        return vi.PreparedImage(id=f'{n:032x}', png=b'png%d' % n, width=3, height=2,
+                                sha256='s', source_name='图纸.png')
 
     def test_store_ttl_and_capacity(self):
-        store = vi.ImageStore()
-        with patch('time.monotonic', return_value=1000.0):
+        store = vi.ImageStore(ttl=7200)
+        with patch('time.time', return_value=1000.0):
             iid = store.put(self._img(0))
-        with patch('time.monotonic', return_value=1000.0 + 7199):
+        with patch('time.time', return_value=1000.0 + 7199):
             self.assertIsNotNone(store.get(iid))
-        with patch('time.monotonic', return_value=1000.0 + 7201):
+        with patch('time.time', return_value=1000.0 + 7201):
             self.assertIsNone(store.get(iid))
 
         store = vi.ImageStore()
@@ -105,6 +107,48 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(store.get(ids[0]))
         self.assertIsNotNone(store.get(ids[1]))
         self.assertIsNotNone(store.get(ids[100]))
+
+    def test_default_ttl_is_seven_days(self):
+        self.assertEqual(vi.STORE_TTL_SECONDS, 7 * 24 * 3600)
+
+    def test_disk_store_survives_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            iid = vi.ImageStore(root=tmp).put(self._img(1))
+            self.assertTrue((Path(tmp) / f'{iid}.png').is_file())
+            # A new store (as after a deploy) finds it on disk, metadata included.
+            got = vi.ImageStore(root=tmp).get(iid)
+            self.assertEqual((got.png, got.width, got.height, got.source_name),
+                             (b'png1', 3, 2, '图纸.png'))
+
+    def test_disk_store_expires_old_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            iid = vi.ImageStore(root=tmp, ttl=100).put(self._img(2))
+            png = Path(tmp) / f'{iid}.png'
+            old = time.time() - 101
+            os.utime(png, (old, old))
+            self.assertIsNone(vi.ImageStore(root=tmp, ttl=100).get(iid))
+            self.assertFalse(png.exists())
+            self.assertFalse((Path(tmp) / f'{iid}.json').exists())
+
+    def test_disk_store_rejects_unsafe_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = vi.ImageStore(root=tmp)
+            for bad in ('../etc/passwd', 'x' * 32, '', 'A' * 32):
+                self.assertIsNone(store.get(bad))
+
+    def test_disk_store_caps_file_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = vi.ImageStore(root=tmp, disk_capacity=2)
+            ids = []
+            for n in range(3):
+                ids.append(store.put(self._img(10 + n)))
+                path = Path(tmp) / f'{ids[-1]}.png'
+                os.utime(path, (time.time() - 30 + n, time.time() - 30 + n))
+            store._last_disk_purge = 0.0
+            store.put(self._img(20))
+            left = {p.stem for p in Path(tmp).glob('*.png')}
+            self.assertEqual(len(left), 2)
+            self.assertNotIn(ids[0], left)
 
 
 class SampleTests(unittest.TestCase):

@@ -5,6 +5,7 @@ import {
   listSamples,
   pollJob,
   submit,
+  uploadImage,
   type SubmitKind,
 } from "../vision/client";
 import {
@@ -39,6 +40,8 @@ const needKey = (g: Gateway) => `请先在第 ① 步填写 ${GATEWAY_NAMES[g]} 
 const servedBy = (m: VisionModel, g: Gateway) =>
   (m.gateways ?? ["openrouter"]).includes(g);
 const isAbort = (e: unknown) => (e as Error)?.name === "AbortError";
+const isImageGone = (e: unknown) =>
+  ((e as Error)?.message ?? "").includes("图片已过期");
 
 async function runJob<T>(
   kind: SubmitKind,
@@ -73,6 +76,13 @@ export default function Vision() {
   const [actionError, setActionError] = useState("");
   // Every in-flight poll listens to this controller; replaced on re-select / import, aborted on unmount.
   const ctrl = useRef(new AbortController());
+  // The uploaded file, kept so it can be re-sent if the server no longer has the image.
+  const uploadFile = useRef<File | undefined>(undefined);
+  const imageNow = useRef<ImageRef | null>(null);
+  imageNow.current = state.image;
+  const reupload = useRef<{ from: string; promise: Promise<ImageRef> }>(
+    undefined,
+  );
 
   useEffect(() => {
     ctrl.current = new AbortController();
@@ -124,6 +134,34 @@ export default function Vision() {
     if (apiKey.trim()) return true;
     setActionError(needKey(gateway));
     return false;
+  }
+
+  // Run a job that needs the drawing; if the server lost the upload, re-upload once and retry.
+  async function withImage<T>(
+    image: ImageRef,
+    run: (image: ImageRef) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run(image);
+    } catch (e) {
+      const file = uploadFile.current;
+      if (image.kind !== "upload" || !file || !isImageGone(e)) throw e;
+      // Jobs running side by side share one re-upload of the same lost image.
+      const current = imageNow.current;
+      if (current && current.id !== image.id) return run(current);
+      let pending = reupload.current;
+      if (!pending || pending.from !== image.id) {
+        const promise = uploadImage(file).then((out) => {
+          const next: ImageRef = { kind: "upload", id: out.image_id };
+          imageNow.current = next;
+          dispatch({ type: "imageReplaced", image: next });
+          return next;
+        });
+        pending = { from: image.id, promise };
+        reupload.current = pending;
+      }
+      return run(await pending.promise);
+    }
   }
 
   async function score(
@@ -189,10 +227,12 @@ export default function Vision() {
       },
     });
     try {
-      const result = await runJob<UnderstandResult>(
-        "understand",
-        { image, model, gateway, api_key: apiKey },
-        signal,
+      const result = await withImage(image, (img) =>
+        runJob<UnderstandResult>(
+          "understand",
+          { image: img, model, gateway, api_key: apiKey },
+          signal,
+        ),
       );
       if (signal.aborted) return;
       dispatch({
@@ -275,10 +315,12 @@ export default function Vision() {
       entry: { id, sourceModel, generator, status: "running" },
     });
     try {
-      const r = await runJob<GenerateResult>(
-        "generate",
-        { image, model: generator, understanding, gateway, api_key: apiKey },
-        signal,
+      const r = await withImage(image, (img) =>
+        runJob<GenerateResult>(
+          "generate",
+          { image: img, model: generator, understanding, gateway, api_key: apiKey },
+          signal,
+        ),
       );
       if (!signal.aborted)
         dispatch({
@@ -373,7 +415,8 @@ export default function Vision() {
           onGateway={changeGateway}
           apiKey={apiKey}
           remember={remember}
-          onSelect={(image, imageName, scorable) => {
+          onSelect={(image, imageName, scorable, file) => {
+            uploadFile.current = image.kind === "upload" ? file : undefined;
             resetJobs();
             dispatch({ type: "selectImage", image, imageName, scorable });
           }}
@@ -424,7 +467,7 @@ export default function Vision() {
       <div className="bottom-tip">
         <span>实验手记</span>
         模型理解、打分与还原都直接调用你所选通道（OpenRouter 或 Kie.ai）的
-        Key；任务结果只在服务器内存中保留 2 小时。
+        Key；任务结果只在服务器内存中保留 2 小时，上传的图纸在服务器上保留 7 天后自动删除。
       </div>
     </>
   );

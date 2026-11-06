@@ -1,8 +1,9 @@
-"""Image preparation, in-memory image store and built-in sample loader."""
+"""Image preparation, upload store (memory or disk) and built-in sample loader."""
 from __future__ import annotations
 
 import hashlib
 import io
+import json
 import logging
 import os
 import threading
@@ -24,8 +25,13 @@ MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 MAX_EDGE = 2048
 MAX_PIXELS = 50_000_000
 PDF_DPI = 200
-STORE_TTL_SECONDS = 7200
-STORE_MAX_ITEMS = 100
+# Uploads live this long. With VISION_UPLOAD_DIR set they are kept on disk, so they also
+# survive restarts and deploys; without it (tests, local dev) only in memory.
+STORE_TTL_SECONDS = float(os.environ.get('VISION_UPLOAD_TTL_HOURS', '168')) * 3600
+STORE_MAX_ITEMS = 100          # in-memory cache size
+DISK_MAX_ITEMS = int(os.environ.get('VISION_UPLOAD_MAX_FILES', '2000'))
+_PURGE_EVERY = 600.0
+_ID_OK = frozenset('0123456789abcdef')
 
 
 class ImageRejected(ValueError):
@@ -115,34 +121,112 @@ def prepare_image(data: bytes, filename: str) -> PreparedImage:
 
 
 class ImageStore:
-    def __init__(self, ttl: float = STORE_TTL_SECONDS, capacity: int = STORE_MAX_ITEMS):
+    """Uploaded images by id: an LRU memory cache, optionally backed by a directory."""
+
+    def __init__(self, ttl: float = STORE_TTL_SECONDS, capacity: int = STORE_MAX_ITEMS,
+                 root: Path | str | None = None, disk_capacity: int = DISK_MAX_ITEMS):
         self._ttl = ttl
         self._capacity = capacity
+        self._root = Path(root) if root else None
+        self._disk_capacity = disk_capacity
         self._items: OrderedDict[str, tuple[float, PreparedImage]] = OrderedDict()
         self._lock = threading.Lock()
+        self._last_disk_purge = 0.0
+        if self._root:
+            self._root.mkdir(parents=True, exist_ok=True)
 
+    # -- memory ---------------------------------------------------------------------
     def _purge(self, now: float) -> None:
         for key in [k for k, (t, _) in self._items.items() if now - t > self._ttl]:
             del self._items[key]
 
+    def _remember(self, img: PreparedImage, at: float) -> None:
+        self._items[img.id] = (at, img)
+        self._items.move_to_end(img.id)
+        while len(self._items) > self._capacity:
+            self._items.popitem(last=False)
+
+    # -- disk -----------------------------------------------------------------------
+    def _paths(self, id: str) -> tuple[Path, Path] | None:
+        # Ids are uuid4 hex; anything else could escape the directory.
+        if not self._root or len(id) != 32 or not set(id) <= _ID_OK:
+            return None
+        return self._root / f'{id}.png', self._root / f'{id}.json'
+
+    def _write(self, img: PreparedImage) -> None:
+        paths = self._paths(img.id)
+        if not paths:
+            return
+        png, meta = paths
+        meta_data = {'width': img.width, 'height': img.height, 'sha256': img.sha256,
+                     'source_name': img.source_name}
+        for path, data in ((png, img.png), (meta, json.dumps(meta_data).encode())):
+            tmp = path.with_suffix(path.suffix + '.tmp')
+            tmp.write_bytes(data)
+            tmp.replace(path)
+
+    def _read(self, id: str, now: float) -> tuple[float, PreparedImage] | None:
+        paths = self._paths(id)
+        if not paths:
+            return None
+        png, meta = paths
+        try:
+            saved = png.stat().st_mtime
+            if now - saved > self._ttl:
+                self._delete(id)
+                return None
+            info = json.loads(meta.read_text('utf-8'))
+            img = PreparedImage(id=id, png=png.read_bytes(), width=int(info['width']),
+                                height=int(info['height']), sha256=str(info['sha256']),
+                                source_name=str(info.get('source_name', '')))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        return saved, img
+
+    def _delete(self, id: str) -> None:
+        for path in self._paths(id) or ():
+            path.unlink(missing_ok=True)
+
+    def _purge_disk(self, now: float) -> None:
+        if not self._root or now - self._last_disk_purge < _PURGE_EVERY:
+            return
+        self._last_disk_purge = now
+        try:
+            files = sorted(((p.stat().st_mtime, p.stem) for p in self._root.glob('*.png')),
+                           reverse=True)
+        except OSError:
+            return
+        for n, (saved, id) in enumerate(files):
+            if n >= self._disk_capacity or now - saved > self._ttl:
+                self._delete(id)
+
+    # -- public ---------------------------------------------------------------------
     def put(self, img: PreparedImage) -> str:
-        now = time.monotonic()
+        now = time.time()
         with self._lock:
             self._purge(now)
-            self._items[img.id] = (now, img)
-            while len(self._items) > self._capacity:
-                self._items.popitem(last=False)
+            self._remember(img, now)
+            try:
+                self._write(img)
+            except OSError as exc:
+                log.warning('could not save upload %s to disk: %s', img.id, exc)
+            self._purge_disk(now)
         return img.id
 
     def get(self, id: str) -> PreparedImage | None:
-        now = time.monotonic()
+        now = time.time()
         with self._lock:
             self._purge(now)
             entry = self._items.get(id)
-            return entry[1] if entry else None
+            if entry is None:
+                entry = self._read(id, now)
+                if entry is None:
+                    return None
+                self._remember(entry[1], entry[0])
+            return entry[1]
 
 
-images = ImageStore()
+images = ImageStore(root=os.environ.get('VISION_UPLOAD_DIR') or None)
 
 
 @dataclass

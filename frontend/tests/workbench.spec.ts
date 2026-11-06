@@ -145,9 +145,11 @@ type Job = {
 
 async function mockVision(
   page: Page,
-  opts: { samples: unknown[]; failOnce?: string },
+  opts: { samples: unknown[]; failOnce?: string; uploadGoneOnce?: boolean },
 ) {
   const jobs = new Map<string, Job>();
+  let uploads = 0;
+  let goneServed = false;
   const failed = new Set<string>();
   let seq = 0;
   const addJob = (job: Omit<Job, "polls">) => {
@@ -235,7 +237,7 @@ async function mockVision(
     if (path === "/images")
       return route.fulfill({
         json: {
-          image_id: "up-1",
+          image_id: `up-${++uploads}`,
           width: 1,
           height: 1,
           sha256: "x",
@@ -243,6 +245,13 @@ async function mockVision(
         },
       });
     if (path === "/understand") {
+      if (opts.uploadGoneOnce && body.image.id === "up-1") {
+        goneServed = true;
+        return route.fulfill({
+          status: 404,
+          json: { detail: "图片已过期，请重新上传。" },
+        });
+      }
       const fail = opts.failOnce === body.model && !failed.has(body.model);
       if (fail) failed.add(body.model);
       return route.fulfill(
@@ -431,4 +440,30 @@ test("vision: Kie.ai gateway runs only the models it serves", async ({
   const stored = await page.evaluate(() => JSON.stringify(localStorage));
   expect(stored).toContain("vision-gateway");
   expect(stored).not.toContain("kie-fixture-secret");
+});
+
+test("vision: an upload the server lost is re-sent automatically", async ({
+  page,
+}) => {
+  await mockVision(page, { samples: [], uploadGoneOnce: true });
+  const images: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
+      images.push(r.postDataJSON().image.id);
+  });
+  await page.goto("/#vision");
+  await page.getByLabel("上传图纸").setInputFiles({
+    name: "mine.png",
+    mimeType: "image/png",
+    buffer: PNG_1x1,
+  });
+  await expect(page.getByRole("img", { name: /图纸预览/ })).toBeVisible();
+  await startUnderstanding(page);
+  await expect(
+    page.locator(".vision-model-card", { hasText: "已完成" }),
+  ).toHaveCount(2, { timeout: 20000 });
+  await expect(page.getByText("图片已过期")).toHaveCount(0);
+  // Both models first tried the lost id; the file was uploaded once more and reused.
+  expect(images.filter((id) => id === "up-2")).toHaveLength(2);
+  expect(images.filter((id) => id === "up-3")).toHaveLength(0);
 });
