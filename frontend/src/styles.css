@@ -1255,6 +1255,40 @@ main {
   font-size: 9px;
   margin-bottom: 0;
 }
+.vision-gateway {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.vision-gateway button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1px solid #e1e7d9;
+  border-radius: 8px;
+  background: #fcfdf9;
+  min-width: 0;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.vision-gateway button:hover {
+  border-color: #c6d7b6;
+}
+.vision-gateway button.active {
+  border-color: #6e9f82;
+  box-shadow: 0 0 0 3px #3d895718;
+}
+.vision-gateway strong {
+  font-size: 11px;
+  color: #2f4a2a;
+}
+.vision-gateway small {
+  font-size: 9px;
+  color: #87977d;
+  overflow-wrap: anywhere;
+}
 .callout {
   padding: 12px;
   background: #f5f7ef;

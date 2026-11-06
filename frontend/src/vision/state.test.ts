@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  exportState, importState, initialState, keyStorage, reducer, type VisionState,
+  exportState, gatewayStorage, importState, initialState, keyStorage, reducer, type VisionState,
 } from "./state";
 
 const populated: VisionState = {
@@ -93,5 +93,18 @@ describe("keyStorage", () => {
     expect(keyStorage.load()).toBe("sk-test");
     keyStorage.save("sk-test", false);
     expect(keyStorage.load()).toBe("");
+  });
+
+  it("keeps a separate key per gateway and remembers the gateway", () => {
+    keyStorage.save("sk-or", true, "openrouter");
+    keyStorage.save("kie-key", true, "kie");
+    expect(keyStorage.load("openrouter")).toBe("sk-or");
+    expect(keyStorage.load("kie")).toBe("kie-key");
+    keyStorage.save("kie-key", false, "kie");
+    expect(keyStorage.load("kie")).toBe("");
+    expect(keyStorage.load("openrouter")).toBe("sk-or");
+    expect(gatewayStorage.load()).toBe("openrouter");
+    gatewayStorage.save("kie");
+    expect(gatewayStorage.load()).toBe("kie");
   });
 });

@@ -19,7 +19,11 @@ const STATUS: Record<RunStatus, string> = {
 const VERDICT = { correct: "正确", uncertain: "存疑", wrong: "错误" } as const;
 
 export const formatCost = (meta?: RunMeta) =>
-  meta?.cost == null ? "费用未知" : `$${meta.cost.toFixed(4)}`;
+  meta?.credits != null
+    ? `${meta.credits} 积分`
+    : meta?.cost == null
+      ? "费用未知"
+      : `$${meta.cost.toFixed(4)}`;
 export const formatElapsed = (meta?: RunMeta) =>
   meta ? `${(meta.elapsed_ms / 1000).toFixed(1)} s` : "—";
 

@@ -159,14 +159,19 @@ export default function StepRedraw({
   onGenerate: (sourceModel: string, generator: string) => void;
 }) {
   const done = Object.values(runs).filter((r) => r.status === "done");
+  // Default to the source model when the current gateway serves it, else the first one it does.
+  const pickGenerator = (src: string) =>
+    models.some((m) => m.id === src) ? src : (models[0]?.id ?? src);
   const [source, setSource] = useState(done[0]?.model ?? "");
-  const [generator, setGenerator] = useState(done[0]?.model ?? "");
+  const [generator, setGenerator] = useState(() =>
+    pickGenerator(done[0]?.model ?? ""),
+  );
   const doneIds = done.map((r) => r.model).join("\n");
   useEffect(() => {
     const ids = doneIds ? doneIds.split("\n") : [];
     if (ids.length && !ids.includes(source)) {
       setSource(ids[0]);
-      setGenerator(ids[0]);
+      setGenerator(pickGenerator(ids[0]));
     }
   }, [doneIds, source]);
   const names: Record<string, string> = Object.fromEntries([
@@ -200,7 +205,7 @@ export default function StepRedraw({
                 value={source}
                 onChange={(e) => {
                   setSource(e.target.value);
-                  setGenerator(e.target.value);
+                  setGenerator(pickGenerator(e.target.value));
                 }}
               >
                 {done.map((r) => (

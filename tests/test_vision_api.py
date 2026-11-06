@@ -37,19 +37,21 @@ def _write_sample(root: Path, sid: str, status: str) -> None:
         'items': [{'id': 'i1', 'target': 't', 'expected': 'e'}]}), 'utf-8')
 
 
-async def _fake_understand(api_key, model_id, image):
-    return {'model': model_id, 'model_name': 'X', 'understanding': UNDERSTANDING, 'meta': {}}
+async def _fake_understand(api_key, model_id, image, gateway):
+    return {'model': model_id, 'model_name': 'X', 'understanding': UNDERSTANDING,
+            'meta': {'gateway': gateway}}
 
 
-async def _fake_score(api_key, rubric, understanding, judge):
-    return {'score': 100.0, 'counts': {}, 'judgements': [], 'meta': {'judge': judge['id']}}
+async def _fake_score(api_key, rubric, understanding, judge, gateway):
+    return {'score': 100.0, 'counts': {}, 'judgements': [],
+            'meta': {'judge': judge['id'], 'gateway': gateway}}
 
 
-async def _fake_consensus(api_key, results, judge):
-    return {'groups': [], 'singletons': [], 'meta': {'judge': judge['id']}}
+async def _fake_consensus(api_key, results, judge, gateway):
+    return {'groups': [], 'singletons': [], 'meta': {'judge': judge['id'], 'gateway': gateway}}
 
 
-async def _fake_generate(api_key, model_id, image, understanding):
+async def _fake_generate(api_key, model_id, image, understanding, gateway):
     return {'model': model_id, 'model_name': 'X', 'geometry': GEOMETRY, 'meta': {'cost': 0}}
 
 
@@ -94,7 +96,8 @@ class VisionAPITests(unittest.TestCase):
         with TestClient(app) as client:
             models = client.get('/api/vision/models').json()
             self.assertEqual(len(models), 9)
-            self.assertEqual(set(models[0]), {'id', 'name', 'family', 'notes', 'params', 'price'})
+            self.assertEqual(set(models[0]), {'id', 'name', 'family', 'notes', 'params', 'price',
+                                             'gateways'})
             self.assertEqual(set(models[0]['params']), {'max_tokens', 'temperature', 'reasoning'})
             self.assertEqual(client.get('/api/vision/judge').json()['id'], MODEL)
             samples = {s['id']: s for s in client.get('/api/vision/samples').json()}
@@ -178,6 +181,33 @@ class VisionAPITests(unittest.TestCase):
             self.assertNotIn(KEY, r.text)
             r = client.post('/api/vision/understand', json={
                 'image': img, 'model': MODEL, 'api_key': KEY, 'extra': 1})
+            self.assertEqual(r.status_code, 422)
+            self.assertNotIn(KEY, r.text)
+
+    def test_kie_gateway(self):
+        with TestClient(app) as client:
+            models = {m['id']: m for m in client.get('/api/vision/models').json()}
+            self.assertEqual(models[MODEL]['gateways'], ['openrouter', 'kie'])
+            self.assertEqual(models['qwen/qwen3.8-max-prime']['gateways'], ['openrouter'])
+            img = {'kind': 'sample', 'id': 'ok'}
+            r = client.post('/api/vision/understand', json={
+                'image': img, 'model': MODEL, 'api_key': KEY, 'gateway': 'kie'})
+            job, _ = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['result']['meta']['gateway'], 'kie')
+            r = client.post('/api/vision/understand', json={
+                'image': img, 'model': 'qwen/qwen3.8-max-prime', 'api_key': KEY, 'gateway': 'kie'})
+            self.assertEqual(r.status_code, 422)
+            self.assertIn('不支持 Kie.ai', r.text)
+            r = client.post('/api/vision/score', json={
+                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'api_key': KEY,
+                'gateway': 'kie', 'judge_model': 'z-ai/glm-5v-turbo'})
+            self.assertEqual(r.status_code, 422)
+            self.assertIn('不支持 Kie.ai', r.text)
+            r = client.post('/api/vision/understand', json={'image': img, 'model': MODEL,
+                                                             'gateway': 'kie'})
+            self.assertIn('请填写 Kie.ai Key', r.text)
+            r = client.post('/api/vision/understand', json={
+                'image': img, 'model': MODEL, 'api_key': KEY, 'gateway': 'other'})
             self.assertEqual(r.status_code, 422)
             self.assertNotIn(KEY, r.text)
 

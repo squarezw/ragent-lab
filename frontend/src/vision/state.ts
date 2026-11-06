@@ -1,5 +1,5 @@
 import type {
-  ConsensusResult, DimWarning, Geometry, ImageRef, RunMeta, ScoreResult, Understanding,
+  ConsensusResult, DimWarning, Gateway, Geometry, ImageRef, RunMeta, ScoreResult, Understanding,
 } from "./types";
 
 export type RunStatus = "idle" | "queued" | "running" | "done" | "failed";
@@ -163,7 +163,11 @@ export function importState(text: string): VisionState {
   };
 }
 
-const KEY_NAME = "vision-openrouter-key";
+const KEY_NAMES: Record<Gateway, string> = {
+  openrouter: "vision-openrouter-key",
+  kie: "vision-kie-key",
+};
+const GATEWAY_NAME = "vision-gateway";
 const JUDGE_NAME = "vision-judge-model";
 export const DEFAULT_JUDGE = "anthropic/claude-opus-5.5";
 
@@ -186,17 +190,34 @@ export const judgeStorage = {
 };
 
 export const keyStorage = {
-  load(): string {
+  load(gateway: Gateway = "openrouter"): string {
     try {
-      return localStorage.getItem(KEY_NAME) ?? "";
+      return localStorage.getItem(KEY_NAMES[gateway]) ?? "";
     } catch {
       return "";
     }
   },
-  save(key: string, remember: boolean): void {
+  save(key: string, remember: boolean, gateway: Gateway = "openrouter"): void {
     try {
-      if (remember) localStorage.setItem(KEY_NAME, key);
-      else localStorage.removeItem(KEY_NAME);
+      if (remember) localStorage.setItem(KEY_NAMES[gateway], key);
+      else localStorage.removeItem(KEY_NAMES[gateway]);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+};
+
+export const gatewayStorage = {
+  load(): Gateway {
+    try {
+      return localStorage.getItem(GATEWAY_NAME) === "kie" ? "kie" : "openrouter";
+    } catch {
+      return "openrouter";
+    }
+  },
+  save(gateway: Gateway): void {
+    try {
+      localStorage.setItem(GATEWAY_NAME, gateway);
     } catch {
       /* storage unavailable */
     }
