@@ -264,7 +264,11 @@ class ConsensusResult(BaseModel):
 # ---- JSON schema helper --------------------------------------------------
 
 def model_json_schema_for(cls) -> dict:
-    """JSON schema for response_format with every $ref inlined (some providers reject $ref)."""
+    """JSON schema for response_format with every $ref inlined (some providers reject $ref).
+
+    Every property is listed as required: Anthropic rejects schemas with more than
+    24 optional properties. Pydantic still fills defaults if a model omits a field.
+    """
     schema = cls.model_json_schema()
     defs = schema.pop('$defs', {})
 
@@ -278,8 +282,11 @@ def model_json_schema_for(cls) -> dict:
                 merged = inline(copy.deepcopy(defs[name]), seen + (name,))
                 extra = {k: inline(v, seen) for k, v in node.items() if k != '$ref'}
                 return {**merged, **extra}
-            return {k: inline(v, seen) for k, v in node.items()
-                    if not (k == 'discriminator' and isinstance(v, dict) and 'propertyName' in v)}
+            out = {k: inline(v, seen) for k, v in node.items()
+                   if not (k == 'discriminator' and isinstance(v, dict) and 'propertyName' in v)}
+            if isinstance(out.get('properties'), dict):
+                out['required'] = list(out['properties'])
+            return out
         if isinstance(node, list):
             return [inline(v, seen) for v in node]
         return node
