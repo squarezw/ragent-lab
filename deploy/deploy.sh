@@ -11,6 +11,8 @@ previous="$(readlink -f "$base_dir/current" 2>/dev/null || true)"
 legacy_running="$(docker inspect -f '{{.State.Running}}' rag-lab 2>/dev/null || true)"
 [[ ! -f "$base_dir/.env" ]] || install -m 600 "$base_dir/.env" "$release_dir/.env"
 compose() { docker compose --project-name ragent-lab --env-file "$release_dir/release.env" -f "$release_dir/docker/docker-compose.yml" "$@"; }
+# Deterministic ownership/permissions for the read-only samples bind mount.
+install -d -m 0755 "${LAB_VISION_SAMPLES:-$base_dir/vision-samples}"
 # Pull before stopping the live legacy service.
 if [[ "${LAB_SKIP_PULL:-false}" != true ]]; then compose pull; fi
 rollback() {

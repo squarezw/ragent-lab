@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 文本分块 | 可用 | 11 种分块策略，参数可调，提供分块预览和长度统计 |
 | Embedding 对比 | 可用 | 7 个向量模型；按查询相似度排名，用同一组候选文本对比各模型 |
-| 图像理解 | 规划中 | 面向工程图纸的视觉理解与信息提取；目前只有规划页，还不能上传图片或推理 |
+| 图像理解 | 可用 | 机械图纸逐步理解与重绘：多个视觉模型读同一张图，Claude 按细则打分、比较一致性，再按理解生成几何并导出 PDF/DXF |
 
 ## 技术栈
 
@@ -29,6 +29,7 @@ frontend/              React 前端（pages/ 下每个实验一个页面）
 src/ragent_lab/api/    FastAPI 路由、schema、实验目录
 src/ragent_lab/chunking/   分块策略与注册表
 src/ragent_lab/embedding/  Embedding 模型与注册表
+src/ragent_lab/vision/     图像理解：模型调用、样例加载、评分与 PDF/DXF 渲染
 docker/                前后端镜像与 compose 配置
 deploy/                服务器发布与回滚脚本
 tests/                 后端单元测试
@@ -87,6 +88,51 @@ docker compose -f docker/docker-compose.yml up -d --build --wait
 前端监听 `127.0.0.1:8501`，通过 `/api` 转发至独立 API 容器。向量模型缓存在 Docker volume 中。默认仅允许浏览器提交用户自己的 API Key，不向前端提供服务器密钥。
 
 可选 `.env` 设置见 [env.example](env.example)。`ALLOW_SERVER_API_KEYS=true` 会允许客户端使用服务器额度，只应在可信访问环境开启；默认关闭。应用不提供账号系统。
+
+## 图像理解样例
+
+内置测试图和评分细则不进仓库，放在仓库外的目录里，由 `VISION_SAMPLES_DIR` 指定（容器内为 `/samples`，宿主机为 `/opt/rag-lab/vision-samples`，只读挂载）。目录为空或不存在时，页面只提供上传。
+
+每个样例一个子文件夹，文件夹名与细则 `id` 相同：
+
+```text
+vision-samples/
+  bracket01/
+    image.jpg          图纸（PNG、JPG 或单页 PDF）
+    rubric.json        评分细则
+```
+
+`rubric.json` 格式：
+
+```json
+{
+  "id": "bracket01",
+  "name": "支架01",
+  "image": "image.jpg",
+  "rubric_status": "approved",
+  "items": [
+    {"id": "C01", "target": "66", "expected": "正确解释", "uncertain_if": "什么情况算保留疑点", "wrong_if": "什么情况算错误"}
+  ]
+}
+```
+
+`rubric_status` 为 `approved` 时才打分；为 `draft` 时，这张图按没有标准答案处理，只显示一致性。`image` 必须位于样例文件夹内。
+
+仓库里只带一个自绘的简单示例 `tests/fixtures/vision-samples/demo_plate/`（120×60 板、φ20 中心孔、2-φ8，带已审定细则），供测试和本机调试使用；重新生成图片：`python tests/fixtures/vision-samples/make_demo_plate.py`。
+
+本机调试（用仓库示例：`VISION_SAMPLES_DIR=tests/fixtures/vision-samples`；用真实测试图：）：
+
+```bash
+VISION_SAMPLES_DIR=~/Documents/AI/ragent-lab-vision-samples python -m uvicorn ragent_lab.api.app:app --app-dir src --reload --port 8000
+```
+
+同步到服务器（rsync 到 `/opt/rag-lab/vision-samples/`，带 `--delete`，然后重启 API 容器）：
+
+```bash
+bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
+```
+
+上传图片上限 15 MB。前端容器的 Nginx 已设置 `client_max_body_size 16m`；生产主机 Nginx 转发 `lab.ragents.net` 时，也必须允许不小于 16 MB 的请求体（`client_max_body_size 16m;` 或更大），否则上传会被主机 Nginx 以 413 拒绝。
 
 ## GitHub Actions CI/CD
 
