@@ -509,6 +509,12 @@ export default function Models() {
                     update((s) => ({ ...s, keys: { ...s.keys, [p]: e.target.value } }))
                   }
                 />
+                {builtin?.platforms?.includes(p) && (
+                  <p className={`field-help ${settings.accessCode.trim() ? "ok" : ""}`}>
+                    服务器已提供 {GATEWAY_NAMES[p]} Key：填写下方的访问码即可直接使用；
+                    这里填了你自己的 Key 时优先用你的。
+                  </p>
+                )}
                 <p className="field-help">
                   <ExternalLink href={PLATFORM_KEY_URL[p]}>获取 Key</ExternalLink>
                 </p>
@@ -569,7 +575,10 @@ export default function Models() {
                 <ErrorMessage message={access} />
               )}
               <p className="field-help">
-                内置模型由服务器付费，每个访问者每小时最多调用 {builtin.per_hour} 次。
+                内置模型{builtin.platforms?.length
+                  ? `和服务器的 ${builtin.platforms.map((p) => GATEWAY_NAMES[p]).join(" / ")} Key`
+                  : ""}
+                由服务器付费，用同一个访问码解锁，每个访问者每小时合计最多调用 {builtin.per_hour} 次。
               </p>
               <div className="model-toggle-list">
                 {builtin.models.map((m) => (

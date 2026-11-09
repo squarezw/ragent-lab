@@ -46,6 +46,29 @@ describe("buildOptions", () => {
     expect(ok[0]).not.toHaveProperty("priceLabel");
   });
 
+  it("the server's platform key works with the access code; an own key wins", () => {
+    const info = { enabled: true, per_hour: 60, models: [], platforms: ["openrouter" as const] };
+    const noCode = buildOptions(settings({}), CATALOG, info);
+    expect(noCode[0]).toMatchObject({ ready: false, problem: "未填写 OpenRouter Key 或访问码" });
+    const [server] = buildOptions(settings({ accessCode: "code" }), CATALOG, info);
+    expect(server).toMatchObject({ ready: true, badge: "OpenRouter · 服务器 Key" });
+    expect(server.ref).toMatchObject({ gateway: "openrouter", api_key: "" });
+    const [own] = buildOptions(
+      settings({ accessCode: "code", keys: { openrouter: "sk-mine", kie: "" } }),
+      CATALOG,
+      info,
+    );
+    expect(own).toMatchObject({ ready: true, badge: "OpenRouter" });
+    expect(own.ref).toMatchObject({ api_key: "sk-mine" });
+    // Kie.ai is not offered by the server: still needs the visitor's key.
+    const kie = buildOptions(
+      settings({ accessCode: "code", catalog: { "a/claude": { enabled: true, via: "kie" } } }),
+      CATALOG,
+      info,
+    );
+    expect(kie[0]).toMatchObject({ ready: false, problem: "未填写 Kie.ai Key" });
+  });
+
   it("uses the chosen platform and ignores one the model is not on", () => {
     const s = settings({
       keys: { openrouter: "", kie: "kie-key" },

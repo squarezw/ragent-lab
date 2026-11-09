@@ -172,6 +172,7 @@ async function mockVision(
     uploadGoneOnce?: boolean;
     hang?: boolean;
     cancelled?: string[];
+    builtin?: unknown;
   },
 ) {
   const jobs = new Map<string, Job>();
@@ -260,7 +261,9 @@ async function mockVision(
       req.method() === "POST" && path !== "/images" ? req.postDataJSON() : null;
     if (path === "/models") return route.fulfill({ json: MODELS });
     if (path === "/builtin")
-      return route.fulfill({ json: { enabled: false, per_hour: 60, models: [] } });
+      return route.fulfill({
+        json: opts.builtin ?? { enabled: false, per_hour: 60, models: [] },
+      });
     if (path === "/samples") return route.fulfill({ json: opts.samples });
     if (path === "/purposes") return route.fulfill({ json: PURPOSES });
     if (/^\/(samples\/[^/]+\/image|images\/[^/]+)$/.test(path))
@@ -672,4 +675,34 @@ test("vision: running tasks can be cancelled one by one or all at once", async (
   // Still cancelled after a few poll intervals: nothing keeps polling or overwrites it.
   await page.waitForTimeout(2500);
   await expect(page.locator(".vision-model-card", { hasText: "已取消" })).toHaveCount(2);
+});
+
+test("vision: the server's OpenRouter key is used with the access code", async ({ page }) => {
+  await mockVision(page, {
+    samples: [SAMPLE],
+    builtin: { enabled: true, per_hour: 60, models: [], platforms: ["openrouter"] },
+  });
+  const bodies: Record<string, unknown>[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
+      bodies.push(r.postDataJSON());
+  });
+  await page.goto("/#models");
+  await expect(page.getByText(/服务器已提供 OpenRouter Key/)).toBeVisible();
+  await page.locator("#access-code").fill("the-code");
+  await page.getByRole("link", { name: /去图像理解/ }).click();
+  await page.getByRole("button", { name: /法兰盘/ }).click();
+  await expect(page.getByText("已就绪 2 个模型")).toBeVisible();
+  await page.getByRole("button", { name: "下一步：理解对比" }).click();
+  await expect(page.locator(".vision-model-option small").first()).toHaveText(
+    "OpenRouter · 服务器 Key",
+  );
+  await page.getByRole("button", { name: "开始理解" }).click();
+  await expect(
+    page.locator(".vision-model-card", { hasText: "已完成" }),
+  ).toHaveCount(2, { timeout: 20000 });
+  expect(bodies[0]).toMatchObject({
+    model: { source: "catalog", gateway: "openrouter", api_key: "" },
+    access_code: "the-code",
+  });
 });

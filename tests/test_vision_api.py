@@ -476,6 +476,38 @@ class ModelRefAPITests(unittest.TestCase):
             r = self._understand(client, {'source': 'catalog', 'id': MODEL})
             self.assertIn('请填写 OpenRouter Key', r.text)
 
+    def test_server_platform_key_with_access_code(self):
+        from ragent_lab.vision.builtin import Builtins
+        env = {**BUILTIN_ENV, 'OPENROUTER_API_KEY': 'sk-or-server', 'VISION_BUILTIN_PER_HOUR': '3'}
+        with patch('ragent_lab.api.vision.builtins', Builtins(env)), TestClient(app) as client:
+            info = client.get('/api/vision/builtin').json()
+            self.assertEqual(info['platforms'], ['openrouter'])
+            self.assertNotIn('sk-or-server', json.dumps(info))
+            ref = {'source': 'catalog', 'id': MODEL, 'gateway': 'openrouter'}
+            # No key and no code: asked for either.
+            r = self._understand(client, ref)
+            self.assertEqual(r.status_code, 422)
+            self.assertIn('访问码', r.json()['detail'])
+            self.assertEqual(self._understand(client, ref, access_code='nope').status_code, 403)
+            r = self._understand(client, ref, access_code='open-sesame')
+            job, polled = self._wait(client, r.json()['job_id'])
+            self.assertEqual(SEEN_KEYS[-1], 'sk-or-server')
+            self.assertTrue(all('sk-or-server' not in t for t in polled))
+            # The visitor's own key wins and does not count toward the hourly limit.
+            r = self._understand(client, {**ref, 'api_key': 'mine'}, access_code='open-sesame')
+            self._wait(client, r.json()['job_id'])
+            self.assertEqual(SEEN_KEYS[-1], 'mine')
+            # Kie.ai has no server key here; the judge uses the same rule.
+            r = self._understand(client, {**ref, 'gateway': 'kie'}, access_code='open-sesame')
+            self.assertIn('请填写 Kie.ai Key', r.text)
+            r = client.post('/api/vision/score', json={
+                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'judge': ref,
+                'access_code': 'open-sesame'})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(self._understand(client, ref, access_code='open-sesame').status_code, 200)
+            r = self._understand(client, ref, access_code='open-sesame')
+            self.assertEqual(r.status_code, 429)
+
     def test_builtin_needs_access_code_and_is_rate_limited(self):
         with TestClient(app) as client:
             listed = client.get('/api/vision/builtin').json()
