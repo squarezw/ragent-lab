@@ -142,7 +142,7 @@ bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 模型分三类，都在服务器上调用，Key 不会发给浏览器：
 
 - **模型目录**（`src/ragent_lab/vision/registry.py`）：Claude Opus 5.5、GPT-6 Astra、Gemini 4 Argon、GLM-5V Turbo、Kimi K3.1 Pro、Seed 2.1 Turbo、MiniMax M3，全部用服务器的 `AIHUBMIX_API_KEY` 经 AIHubMix 调用（Claude 走原生 Messages 接口，其余走 Chat Completions + JSON Schema）。没有 `AIHUBMIX_API_KEY` 时目录为空。
-- **内置模型**（`VISION_BUILTIN_MODELS`）：直连模型厂商自己的接口，例如 DeepSeek、Qwen（阿里云百炼）。
+- **内置模型**（`VISION_BUILTIN_MODELS`）：直连模型厂商自己的接口，例如 DeepSeek、Qwen（阿里云百炼）。阿里云的 Key 只在创建它的地域和套餐对应的地址上有效：普通百炼 Key 用 `https://dashscope.aliyuncs.com/compatible-mode/v1`，Token Plan 的 `sk-sp-…` Key 用 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；地址不对会返回 401 “Incorrect API key”。
 - **自定义模型**：访客自己填接口地址、模型名和 Key。预设可一键填好 DeepSeek、Moonshot（Kimi）、阿里云百炼（Qwen）、智谱（GLM）、OpenAI、Anthropic 官方接口的地址和格式；支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种格式。服务器只调用公网 https 地址，解析到本机或内网的地址会被拒绝，也不跟随重定向。
 
 目录模型和内置模型共用访问码和每个访客 IP 每小时的调用上限（`VISION_BUILTIN_PER_HOUR`）；连续输错 10 次访问码的 IP 锁定一小时。
@@ -160,8 +160,8 @@ VISION_BUILTIN_MODELS='[
    "url":"https://api.deepseek.com/chat/completions","model":"deepseek-flash",
    "key_env":"DEEPSEEK_API_KEY","json":"object","extra":{"thinking":{"type":"disabled"}}},
   {"id":"qwen","name":"Qwen3.8 Max","api":"chat",
-   "url":"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions","model":"qwen3.8-max",
-   "key_env":"DASHSCOPE_API_KEY","json":"schema"}]'
+   "url":"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+   "model":"qwen3.8-max","key_env":"DASHSCOPE_API_KEY","json":"schema","max_tokens":64000}]'
 ```
 
 `VISION_BUILTIN_MODELS` 每个条目：`id`（小写短名）、`name`、`api`（`chat` | `responses` | `anthropic`）、`url`（https）、`model`、`key_env`（存放 Key 的环境变量名）、`json`（`schema` | `object` | `prompt`，默认 `prompt`）、`auth`（`bearer` | `x-api-key`）、`max_tokens`、`notes`（显示在设置页）、`extra`（合并进请求体的 JSON 对象，不能覆盖 `model`、`messages` 等字段；例如 DeepSeek 关闭思考：`{"thinking":{"type":"disabled"}}`，同一张演示图从约 35 秒降到约 10 秒）。缺 Key 或格式不对的条目会被跳过并写入日志。改完 `.env` 后重启 API 容器生效。
