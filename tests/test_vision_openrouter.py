@@ -13,8 +13,7 @@ from ragent_lab.vision.registry import JUDGE_MODEL, VISION_MODELS, get_model
 
 IDS = ['anthropic/claude-opus-5.5', 'openai/gpt-6-astra', 'google/gemini-4-argon',
        'qwen/qwen3.8-max-prime', 'z-ai/glm-5v-turbo', 'moonshotai/kimi-k3.1-pro',
-       'bytedance-seed/seed-2-1-turbo', 'deepseek/deepseek-v4-flash-vision-exp',
-       'minimax/minimax-m3']
+       'bytedance-seed/seed-2-1-turbo', 'minimax/minimax-m3']
 KEY = 'sk-test'
 MSGS = [{'role': 'user', 'content': 'hi'}]
 
