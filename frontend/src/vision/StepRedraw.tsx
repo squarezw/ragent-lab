@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, FileDown, PenTool } from "lucide-react";
 import { EmptyState, ErrorMessage, Panel, RunButton } from "../components/UI";
+import JsonViewer from "../components/JsonViewer";
 import { exportFile, imageUrl } from "./client";
 import { formatCost, formatElapsed, StatusIcon } from "./ModelStatusCard";
 import type { GenerationEntry, RunEntry } from "./state";
@@ -134,6 +135,14 @@ function GenerationCard({
               <FileDown size={13} />
               下载 DXF
             </button>
+            {entry.geometry && (
+              <JsonViewer
+                title="还原几何清单"
+                data={entry.geometry}
+                filename="geometry"
+                label="几何 JSON"
+              />
+            )}
           </div>
         </>
       )}
