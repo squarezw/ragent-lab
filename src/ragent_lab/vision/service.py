@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from . import prompts
 from .compat import call_endpoint
 from .images import PreparedImage
+from .aihubmix import chat_json as aihubmix_chat_json
 from .kie import chat_json as kie_chat_json
 from .openrouter import CallResult, OpenRouterError, chat_json
 from .registry import JUDGE_MODEL, get_model
@@ -27,11 +28,11 @@ _POINTS = {'correct': 1.0, 'uncertain': 0.5, 'wrong': 0.0}
 
 async def _call(gateway: str, api_key: str, model: dict, messages: list[dict],
                 schema_name: str, schema: dict) -> CallResult:
-    """gateway: 'openrouter' | 'kie' (catalog models), 'builtin' | 'custom' (own endpoint)."""
+    """gateway: 'openrouter' | 'kie' | 'aihubmix' (catalog), 'builtin' | 'custom' (own endpoint)."""
     if gateway in ('builtin', 'custom'):
         return await call_endpoint(api_key, model['endpoint'], model, messages,
                                    schema_name, schema)
-    fn = kie_chat_json if gateway == 'kie' else chat_json
+    fn = {'kie': kie_chat_json, 'aihubmix': aihubmix_chat_json}.get(gateway, chat_json)
     return await fn(api_key, model, messages, schema_name, schema)
 
 

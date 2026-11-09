@@ -1,10 +1,11 @@
 // Mirrors the backend JSON (src/ragent_lab/api/vision.py, vision/schema.py, service.py).
 
-export type Gateway = "openrouter" | "kie";
+export type Gateway = "openrouter" | "kie" | "aihubmix";
 
 export const GATEWAY_NAMES: Record<Gateway, string> = {
   openrouter: "OpenRouter",
   kie: "Kie.ai",
+  aihubmix: "AIHubMix",
 };
 
 export type VisionModel = {

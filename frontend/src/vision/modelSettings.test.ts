@@ -3,14 +3,16 @@ import {
   DEFAULT_SETTINGS,
   PRESETS,
   buildOptions,
+  catalogChoice,
   newCustom,
   parseSettings,
   storedForm,
+  type BuiltinInfo,
   type ModelSettings,
 } from "./modelSettings";
 import type { VisionModel } from "./types";
 
-const model = (id: string, gateways: ("openrouter" | "kie")[]): VisionModel => ({
+const model = (id: string, gateways: ("openrouter" | "kie" | "aihubmix")[]): VisionModel => ({
   id,
   name: id.toUpperCase(),
   family: "x",
@@ -33,7 +35,7 @@ describe("buildOptions", () => {
       ["catalog:b/qwen", false, "未填写 OpenRouter Key"],
     ]);
     const ok = buildOptions(
-      settings({ keys: { openrouter: "sk-or", kie: "" } }),
+      settings({ keys: { openrouter: "sk-or", kie: "", aihubmix: "" } }),
       CATALOG,
       null,
     );
@@ -54,7 +56,7 @@ describe("buildOptions", () => {
     expect(server).toMatchObject({ ready: true, badge: "OpenRouter · 服务器 Key" });
     expect(server.ref).toMatchObject({ gateway: "openrouter", api_key: "" });
     const [own] = buildOptions(
-      settings({ accessCode: "code", keys: { openrouter: "sk-mine", kie: "" } }),
+      settings({ accessCode: "code", keys: { openrouter: "sk-mine", kie: "", aihubmix: "" } }),
       CATALOG,
       info,
     );
@@ -69,9 +71,24 @@ describe("buildOptions", () => {
     expect(kie[0]).toMatchObject({ ready: false, problem: "未填写 Kie.ai Key" });
   });
 
+  it("an unset model defaults to the first usable platform, preferring AIHubMix", () => {
+    const m = model("a/claude", ["openrouter", "kie", "aihubmix"]);
+    const pick = (patch: Partial<ModelSettings>, info: BuiltinInfo | null = null) =>
+      catalogChoice(settings(patch), m, info).via;
+    expect(pick({})).toBe("openrouter"); // nothing usable: the first platform
+    expect(pick({ keys: { openrouter: "sk-or", kie: "", aihubmix: "" } })).toBe("openrouter");
+    expect(pick({ keys: { openrouter: "sk-or", kie: "", aihubmix: "sk-ahm" } })).toBe("aihubmix");
+    const info = { enabled: true, per_hour: 60, models: [], platforms: ["aihubmix" as const] };
+    expect(pick({ accessCode: "c" }, info)).toBe("aihubmix");
+    // An explicit choice always wins.
+    expect(
+      pick({ accessCode: "c", catalog: { "a/claude": { enabled: true, via: "kie" } } }, info),
+    ).toBe("kie");
+  });
+
   it("uses the chosen platform and ignores one the model is not on", () => {
     const s = settings({
-      keys: { openrouter: "", kie: "kie-key" },
+      keys: { openrouter: "", kie: "kie-key", aihubmix: "" },
       catalog: {
         "a/claude": { enabled: true, via: "kie" },
         "b/qwen": { enabled: true, via: "kie" }, // qwen is not on Kie.ai
@@ -126,7 +143,7 @@ describe("storage form", () => {
   it("drops every key when the visitor opts out", () => {
     const c = { ...newCustom(PRESETS[0]), name: "x", api_key: "sk-c" };
     const s = settings({
-      keys: { openrouter: "sk-or", kie: "k" },
+      keys: { openrouter: "sk-or", kie: "k", aihubmix: "" },
       accessCode: "code",
       custom: [c],
       rememberKeys: false,
@@ -137,7 +154,7 @@ describe("storage form", () => {
   });
 
   it("parses saved settings and tolerates junk", () => {
-    const s = settings({ keys: { openrouter: "a", kie: "b" }, accessCode: "c" });
+    const s = settings({ keys: { openrouter: "a", kie: "b", aihubmix: "" }, accessCode: "c" });
     expect(parseSettings(JSON.stringify(s))).toEqual(s);
     expect(parseSettings("{oops")).toEqual(DEFAULT_SETTINGS);
     expect(parseSettings('{"custom":[1,{"uid":"u"}]}').custom).toHaveLength(1);
@@ -166,6 +183,6 @@ describe("first run", () => {
   it("carries over keys saved by the old key form", () => {
     store.set("vision-openrouter-key", "old-or");
     store.set("vision-kie-key", "old-kie");
-    expect(parseSettings(null).keys).toEqual({ openrouter: "old-or", kie: "old-kie" });
+    expect(parseSettings(null).keys).toEqual({ openrouter: "old-or", kie: "old-kie", aihubmix: "" });
   });
 });

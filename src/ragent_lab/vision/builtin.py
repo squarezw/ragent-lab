@@ -13,7 +13,7 @@
         notes      optional text shown on the settings page
         extra      optional JSON object merged into the request body, e.g.
                    {"thinking": {"type": "disabled"}} for DeepSeek without thinking
-    OPENROUTER_API_KEY, KIE_API_KEY
+    OPENROUTER_API_KEY, KIE_API_KEY, AIHUBMIX_API_KEY
                              the server's own platform keys: visitors with the access code can
                              call the catalog models through them without a key of their own
     LAB_ACCESS_CODE          visitors must enter it to use built-in models or the server's
@@ -43,7 +43,8 @@ _AUTH = ('bearer', 'x-api-key')
 # Body fields the client builds itself; extra may not replace them.
 _RESERVED = {'model', 'messages', 'input', 'stream', 'system'}
 
-PLATFORM_KEY_ENV = {'openrouter': 'OPENROUTER_API_KEY', 'kie': 'KIE_API_KEY'}
+PLATFORM_KEY_ENV = {'openrouter': 'OPENROUTER_API_KEY', 'kie': 'KIE_API_KEY',
+                    'aihubmix': 'AIHUBMIX_API_KEY'}
 WINDOW_SECONDS = 3600.0
 FAILED_CODE_LIMIT = 10  # wrong access codes per IP per window before lock-out
 

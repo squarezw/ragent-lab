@@ -12,7 +12,7 @@ _PRICE_TTL = 6 * 3600
 _price_cache: dict = {'at': 0.0, 'data': None}
 
 
-GATEWAYS = ('openrouter', 'kie')
+GATEWAYS = ('openrouter', 'kie', 'aihubmix')
 
 
 def _m(id, name, family, response_format, max_tokens=32000, temperature=0.2,
@@ -58,6 +58,25 @@ JUDGE_MODEL: dict = _m(
     temperature=None, provider=_ANTHROPIC_ONLY,
     notes='判定模型，锁定 Anthropic 服务商', kie=_KIE_CLAUDE)
 
+# AIHubMix (https://aihubmix.com): one key for every family. Claude goes through its native
+# Messages endpoint; the rest through Chat Completions with a JSON schema. Model names checked
+# against /v1/models and tested on the sample drawings (2026-11-09). Qwen3.8 Max Prime is not
+# offered there (only Qwen3.8 Max), so it stays OpenRouter-only.
+AIHUBMIX = {
+    'anthropic/claude-opus-5.5': {'api': 'anthropic', 'model': 'claude-opus-5-5', 'json': 'prompt'},
+    'openai/gpt-6-astra': {'api': 'chat', 'model': 'gpt-6-astra', 'json': 'schema'},
+    # Gemini's schema validator needs anyOf instead of oneOf and no length/count limits.
+    'google/gemini-4-argon': {'api': 'chat', 'model': 'gemini-4-argon', 'json': 'schema',
+                              'lean_schema': True},
+    'z-ai/glm-5v-turbo': {'api': 'chat', 'model': 'glm-5v-turbo', 'json': 'schema'},
+    'moonshotai/kimi-k3.1-pro': {'api': 'chat', 'model': 'kimi-k3.1-pro', 'json': 'schema'},
+    'bytedance-seed/seed-2-1-turbo': {'api': 'chat', 'model': 'doubao-seed-2-1-turbo',
+                                      'json': 'schema'},
+    'minimax/minimax-m3': {'api': 'chat', 'model': 'minimax-m3', 'json': 'schema'},
+}
+for _model in [*VISION_MODELS, JUDGE_MODEL]:
+    _model['aihubmix'] = AIHUBMIX.get(_model['id'])
+
 
 def get_model(model_id: str) -> dict:
     for m in VISION_MODELS:
@@ -67,7 +86,8 @@ def get_model(model_id: str) -> dict:
 
 
 def gateways_of(model: dict) -> list[str]:
-    return ['openrouter'] + (['kie'] if model.get('kie') else [])
+    return (['openrouter'] + (['kie'] if model.get('kie') else [])
+            + (['aihubmix'] if model.get('aihubmix') else []))
 
 
 def judge_model(model_id: str | None = None) -> dict:

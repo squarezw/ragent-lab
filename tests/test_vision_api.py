@@ -196,7 +196,7 @@ class VisionAPITests(unittest.TestCase):
     def test_kie_gateway(self):
         with TestClient(app) as client:
             models = {m['id']: m for m in client.get('/api/vision/models').json()}
-            self.assertEqual(models[MODEL]['gateways'], ['openrouter', 'kie'])
+            self.assertEqual(models[MODEL]['gateways'], ['openrouter', 'kie', 'aihubmix'])
             self.assertEqual(models['qwen/qwen3.8-max-prime']['gateways'], ['openrouter'])
             img = {'kind': 'sample', 'id': 'ok'}
             r = client.post('/api/vision/understand', json={

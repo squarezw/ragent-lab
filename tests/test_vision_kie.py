@@ -68,12 +68,12 @@ def recorder(response):
 
 class KieRegistryTests(unittest.TestCase):
     def test_only_mapped_models_offer_kie(self):
-        self.assertEqual(gateways_of(CLAUDE), ['openrouter', 'kie'])
+        self.assertEqual(gateways_of(CLAUDE), ['openrouter', 'kie', 'aihubmix'])
         kie_models = {m for m in ('anthropic/claude-opus-5.5', 'openai/gpt-6-astra',
                                   'google/gemini-4-argon', 'moonshotai/kimi-k3.1-pro')}
         for mid in ('qwen/qwen3.8-max-prime', 'z-ai/glm-5v-turbo', 'minimax/minimax-m3',
                     'bytedance-seed/seed-2-1-turbo'):
-            self.assertEqual(gateways_of(get_model(mid)), ['openrouter'], mid)
+            self.assertNotIn('kie', gateways_of(get_model(mid)), mid)
         self.assertEqual(len(kie_models), 4)
 
 

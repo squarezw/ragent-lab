@@ -28,6 +28,7 @@ import httpx
 
 from . import netguard
 from .openrouter import CallResult, OpenRouterError, extract_json
+from .schema import lean_schema
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +107,8 @@ def _chat_body(ep: dict, max_tokens: int, messages: list[dict], schema_name: str
     body: dict = {'messages': [{'role': 'user', 'content': parts}], 'stream': True,
                   'max_tokens': max_tokens}
     if mode == 'schema':
+        if ep.get('lean_schema'):
+            schema = lean_schema(schema)
         body['response_format'] = {'type': 'json_schema', 'json_schema': {
             'name': schema_name, 'strict': False, 'schema': schema}}
     elif mode == 'object':

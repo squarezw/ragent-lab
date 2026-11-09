@@ -91,6 +91,26 @@ export const PRESETS: Preset[] = [
     keyUrl: "https://openrouter.ai/keys",
   },
   {
+    id: "aihubmix",
+    label: "AIHubMix（任意模型）",
+    api: "chat",
+    url: "https://aihubmix.com/v1/chat/completions",
+    json_mode: "schema",
+    auth: "bearer",
+    modelHint: "例如 gemini-4-argon、gpt-6-astra",
+    keyUrl: "https://aihubmix.com",
+  },
+  {
+    id: "aihubmix-claude",
+    label: "AIHubMix · Claude（原生接口）",
+    api: "anthropic",
+    url: "https://aihubmix.com/v1/messages",
+    json_mode: "prompt",
+    auth: "x-api-key",
+    modelHint: "例如 claude-opus-5-5",
+    keyUrl: "https://aihubmix.com",
+  },
+  {
     id: "kie-claude",
     label: "Kie.ai · Claude",
     api: "anthropic",
@@ -204,7 +224,7 @@ export const PRESETS: Preset[] = [
 
 export const DEFAULT_SETTINGS: ModelSettings = {
   version: 1,
-  keys: { openrouter: "", kie: "" },
+  keys: { openrouter: "", kie: "", aihubmix: "" },
   rememberKeys: true,
   accessCode: "",
   catalog: {},
@@ -213,10 +233,14 @@ export const DEFAULT_SETTINGS: ModelSettings = {
 };
 
 const STORAGE = "lab-model-settings";
-const LEGACY_KEYS: Record<Platform, string> = {
+const LEGACY_KEYS: Partial<Record<Platform, string>> = {
   openrouter: "vision-openrouter-key",
   kie: "vision-kie-key",
 };
+const LEGACY_PLATFORMS: Platform[] = ["openrouter", "kie"];
+export const PLATFORMS: Platform[] = ["openrouter", "kie", "aihubmix"];
+// Default platform for a catalog model the visitor has not set: the first usable one here.
+const PREFERRED: Platform[] = ["aihubmix", "openrouter", "kie"];
 
 function read(name: string): string | null {
   try {
@@ -234,8 +258,7 @@ export function parseSettings(raw: string | null): ModelSettings {
   const base: ModelSettings = structuredClone(DEFAULT_SETTINGS);
   if (!raw) {
     // First visit after the settings page shipped: carry over keys saved by the old form.
-    for (const p of ["openrouter", "kie"] as Platform[])
-      base.keys[p] = read(LEGACY_KEYS[p]) ?? "";
+    for (const p of LEGACY_PLATFORMS) base.keys[p] = read(LEGACY_KEYS[p]!) ?? "";
     return base;
   }
   let data: unknown;
@@ -251,6 +274,7 @@ export function parseSettings(raw: string | null): ModelSettings {
     keys: {
       openrouter: typeof keys.openrouter === "string" ? keys.openrouter : "",
       kie: typeof keys.kie === "string" ? keys.kie : "",
+      aihubmix: typeof keys.aihubmix === "string" ? keys.aihubmix : "",
     },
     rememberKeys: data.rememberKeys !== false,
     accessCode: typeof data.accessCode === "string" ? data.accessCode : "",
@@ -273,7 +297,7 @@ export function storedForm(s: ModelSettings): ModelSettings {
   if (s.rememberKeys) return s;
   return {
     ...s,
-    keys: { openrouter: "", kie: "" },
+    keys: { openrouter: "", kie: "", aihubmix: "" },
     accessCode: "",
     custom: s.custom.map((c) => ({ ...c, api_key: "" })),
   };
@@ -291,8 +315,7 @@ export function saveSettings(next: ModelSettings): void {
   current = next;
   try {
     localStorage.setItem(STORAGE, JSON.stringify(storedForm(next)));
-    for (const p of ["openrouter", "kie"] as Platform[])
-      localStorage.removeItem(LEGACY_KEYS[p]);
+    for (const p of LEGACY_PLATFORMS) localStorage.removeItem(LEGACY_KEYS[p]!);
   } catch {
     /* storage unavailable: settings last for this page view */
   }
@@ -314,10 +337,19 @@ export function useModelSettings(): [
   return [settings, (update) => saveSettings(update(current))];
 }
 
-export function catalogChoice(s: ModelSettings, m: VisionModel) {
+export function catalogChoice(
+  s: ModelSettings,
+  m: VisionModel,
+  builtin: BuiltinInfo | null = null,
+) {
   const saved = s.catalog[m.id];
   const served = m.gateways ?? ["openrouter"];
-  const via = saved && served.includes(saved.via) ? saved.via : served[0];
+  const usable = (p: Platform) =>
+    s.keys[p].trim() !== "" || serverKeyFor(s, builtin, p);
+  const via =
+    saved && served.includes(saved.via)
+      ? saved.via
+      : (PREFERRED.find((p) => served.includes(p) && usable(p)) ?? served[0]);
   return { enabled: saved?.enabled ?? true, via };
 }
 
@@ -338,7 +370,7 @@ export function buildOptions(
 ): ModelOption[] {
   const out: ModelOption[] = [];
   for (const m of catalog) {
-    const { enabled, via } = catalogChoice(s, m);
+    const { enabled, via } = catalogChoice(s, m, builtin);
     if (!enabled && !includeDisabled) continue;
     const key = s.keys[via];
     const own = key.trim() !== "";

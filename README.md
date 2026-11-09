@@ -139,7 +139,7 @@ bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 
 侧栏底部的「模型设置」页决定图像理解页和评判模型里能选哪些模型。设置只存在访客浏览器的 localStorage 里（可选择不保存 Key），服务器不保存任何访客 Key。
 
-- **代理平台**：填 OpenRouter / Kie.ai 的 Key，并为模型目录里的每个模型选择经哪个平台调用（Kie.ai 只提供 Claude、GPT、Gemini、Kimi）。服务器可以配置自己的 OpenRouter / Kie.ai Key（`OPENROUTER_API_KEY`、`KIE_API_KEY`）：访客输入访问码后不填 Key 也能用；访客填了自己的 Key 时优先用自己的，不占服务器额度。
+- **代理平台**：填 AIHubMix / OpenRouter / Kie.ai 的 Key，并为模型目录里的每个模型选择经哪个平台调用（AIHubMix 提供除 Qwen3.8 Max Prime 以外的全部模型，Kie.ai 只提供 Claude、GPT、Gemini、Kimi）。没选过平台的模型默认用访客能用的第一个：AIHubMix、OpenRouter、Kie.ai。服务器可以配置自己的 AIHubMix / OpenRouter / Kie.ai Key（`AIHUBMIX_API_KEY`、`OPENROUTER_API_KEY`、`KIE_API_KEY`）：访客输入访问码后不填 Key 也能用；访客填了自己的 Key 时优先用自己的，不占服务器额度。
 - **内置模型**：由服务器付费，配置在 API 的环境变量里，访客输入访问码后可用，每个 IP 每小时有调用上限。Key 和接口地址都不会发给浏览器。
 - **自定义模型**：访客自己填接口地址、模型名和 Key。预设可一键填好 OpenRouter、Kie.ai、DeepSeek、Moonshot（Kimi）、阿里云百炼（Qwen）、智谱（GLM）、OpenAI、Anthropic 的地址和格式；支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种格式。服务器只调用公网 https 地址，解析到本机或内网的地址会被拒绝，也不跟随重定向。
 
@@ -150,6 +150,7 @@ LAB_ACCESS_CODE=choose-a-long-random-code   # 不设置则不开放内置模型�
 VISION_BUILTIN_PER_HOUR=60                   # 每个访客 IP 每小时的调用次数（内置模型和服务器 Key 合计）
 OPENROUTER_API_KEY=sk-or-...                 # 可选：服务器的 OpenRouter Key，凭访问码使用
 KIE_API_KEY=...                              # 可选：服务器的 Kie.ai Key，凭访问码使用
+AIHUBMIX_API_KEY=sk-...                       # 可选：服务器的 AIHubMix Key，凭访问码使用
 DEEPSEEK_API_KEY=sk-...
 VISION_BUILTIN_MODELS='[{"id":"deepseek","name":"DeepSeek（内置）","api":"chat",
   "url":"https://api.deepseek.com/chat/completions","model":"<视觉模型名>",

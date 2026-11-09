@@ -209,6 +209,7 @@ export function importState(text: string): VisionState {
 const KEY_NAMES: Record<Gateway, string> = {
   openrouter: "vision-openrouter-key",
   kie: "vision-kie-key",
+  aihubmix: "vision-aihubmix-key",
 };
 const GATEWAY_NAME = "vision-gateway";
 const JUDGE_NAME = "vision-judge-model";

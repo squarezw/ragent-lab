@@ -34,7 +34,7 @@ class CatalogRef(_Body):
     """A registry model, called through a proxy platform with the visitor's key."""
     source: Literal['catalog']
     id: str
-    gateway: Literal['openrouter', 'kie'] = 'openrouter'
+    gateway: Literal['openrouter', 'kie', 'aihubmix'] = 'openrouter'
     api_key: SecretStr = SecretStr('')
 
 
@@ -63,7 +63,7 @@ ModelRef = Annotated[Union[CatalogRef, BuiltinRef, CustomRef], Field(discriminat
 class _Keyed(_Body):
     # Legacy fields, used when `model` / `judge_model` are plain catalog ids.
     api_key: SecretStr = SecretStr('')
-    gateway: Literal['openrouter', 'kie'] = 'openrouter'
+    gateway: Literal['openrouter', 'kie', 'aihubmix'] = 'openrouter'
     access_code: SecretStr = SecretStr('')
 
 
@@ -115,7 +115,7 @@ class ExportBody(_Body):
     filename: str = Field(default='drawing', max_length=200)
 
 
-GATEWAY_NAMES = {'openrouter': 'OpenRouter', 'kie': 'Kie.ai'}
+GATEWAY_NAMES = {'openrouter': 'OpenRouter', 'kie': 'Kie.ai', 'aihubmix': 'AIHubMix'}
 
 
 def _use_server_key(gateway: str, body: _Keyed, request: Request) -> str:

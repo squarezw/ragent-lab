@@ -38,6 +38,7 @@ const JSON_LABELS = {
 const PLATFORM_KEY_URL: Record<Platform, string> = {
   openrouter: "https://openrouter.ai/keys",
   kie: "https://kie.ai/api-key",
+  aihubmix: "https://aihubmix.com",
 };
 
 function CustomForm({
@@ -610,8 +611,9 @@ export default function Models() {
 
         <Panel title="模型目录" meta={<span className="panel-index">03</span>}>
           <p className="field-help">
-            实验预设的模型。勾选后出现在图像理解页和评判模型中；同一个模型可以选择经 OpenRouter
-            或 Kie.ai 调用（Kie.ai 只提供其中一部分）。
+            实验预设的模型。勾选后出现在图像理解页和评判模型中；同一个模型可以选择经 AIHubMix、OpenRouter
+            或 Kie.ai 调用（AIHubMix 提供除 Qwen 以外的全部模型，Kie.ai 只提供其中 4 个）。没选过平台的模型，
+            默认用你能用的第一个：AIHubMix、OpenRouter、Kie.ai。
           </p>
           <div className="vision-table-wrap">
             <table className="vision-table">
@@ -624,7 +626,7 @@ export default function Models() {
               </thead>
               <tbody>
                 {catalog.map((m) => {
-                  const choice = catalogChoice(settings, m);
+                  const choice = catalogChoice(settings, m, builtin);
                   const served = m.gateways ?? ["openrouter"];
                   const set = (patch: Partial<typeof choice>) =>
                     update((s) => ({
