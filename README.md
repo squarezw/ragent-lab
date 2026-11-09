@@ -89,6 +89,15 @@ docker compose -f docker/docker-compose.yml up -d --build --wait
 
 可选 `.env` 设置见 [env.example](env.example)。`ALLOW_SERVER_API_KEYS=true` 会允许客户端使用服务器额度，只应在可信访问环境开启；默认关闭。应用不提供账号系统。
 
+## 图像理解的使用流程
+
+1. **① 选图**：选内置测试图或上传图片（PNG、JPG、单页 PDF，≤ 15 MB），选这张图的用途（工程图纸、数据图表、流程图 / 架构图、通用图片或自己的用途），需要时查看或修改提示词。
+2. **② 理解对比**：勾选模型后开始理解，多个模型同时运行。
+   - 有已审定细则的样例会自动打分；没有标准答案的图可以「生成一致性对照」，标出模型之间的分歧。打分和对照用页面上选的评判模型（默认 Claude Opus 5.5）。
+   - 运行中的任务可以随时取消：每张卡片的「取消」、对照的「取消」，或「取消全部任务」；取消会同时停止服务器上的模型调用。
+   - 每个结果都能「查看完整 JSON」（可复制、下载）；「导出结果 JSON」保存整轮结果，之后可以再导入。
+3. **③ 还原 DXF**（只有工程图纸用途有这一步）：选一份理解和一个生成模型，模型按理解输出 1:1 的毫米几何，服务器渲染成预览，可下载 PDF 和 DXF。尺寸与标注不符时列出警告。DXF 的单位是毫米，标注样式 `LAB_MM` 不做缩放，在 CAD 里 R128 就显示 R128。
+
 ## 图像理解样例
 
 内置测试图和评分细则不进仓库，放在仓库外的目录里，由 `VISION_SAMPLES_DIR` 指定（容器内为 `/samples`，宿主机为 `/opt/rag-lab/vision-samples`，只读挂载）。目录为空或不存在时，页面只提供上传。
@@ -133,6 +142,8 @@ VISION_SAMPLES_DIR=~/Documents/AI/ragent-lab-vision-samples python -m uvicorn ra
 bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 ```
 
+服务器上目前有一个真实样例 `bracket01`（支架，细则为 `draft`，13 条，待人工审定后改成 `approved` 才会打分）。同步脚本带 `--delete`，本地目录里没有的样例会从服务器删掉：同步前先把服务器上的 `bracket01/` 拷回本地。
+
 上传图片上限 15 MB。上传的图纸存进 API 容器的 Docker 卷 `vision-uploads`（`VISION_UPLOAD_DIR=/data/vision-uploads`），重启和发版后仍在，`VISION_UPLOAD_TTL_HOURS`（默认 168，即 7 天）后自动删除，最多保留 `VISION_UPLOAD_MAX_FILES`（默认 2000）张；未设置 `VISION_UPLOAD_DIR` 时只存内存。服务器上找不到图片时，页面会用浏览器里的原文件自动重新上传一次。前端容器的 Nginx 已设置 `client_max_body_size 16m`；生产主机 Nginx 转发 `lab.ragents.net` 时，也必须允许不小于 16 MB 的请求体（`client_max_body_size 16m;` 或更大），否则上传会被主机 Nginx 以 413 拒绝。
 
 ## 图像理解的模型设置
@@ -158,11 +169,18 @@ DASHSCOPE_API_KEY=sk-...
 VISION_BUILTIN_MODELS='[
   {"id":"deepseek-fast","name":"DeepSeek V4.1 Flash（快速）","api":"chat",
    "url":"https://api.deepseek.com/chat/completions","model":"deepseek-flash",
-   "key_env":"DEEPSEEK_API_KEY","json":"object","extra":{"thinking":{"type":"disabled"}}},
+   "key_env":"DEEPSEEK_API_KEY","json":"object","extra":{"thinking":{"type":"disabled"}},
+   "notes":"关闭思考，约 10 秒"},
+  {"id":"deepseek","name":"DeepSeek V4.1 Flash（深度思考）","api":"chat",
+   "url":"https://api.deepseek.com/chat/completions","model":"deepseek-flash",
+   "key_env":"DEEPSEEK_API_KEY","json":"object","notes":"先思考再回答，约 30–90 秒"},
   {"id":"qwen","name":"Qwen3.8 Max","api":"chat",
    "url":"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
-   "model":"qwen3.8-max","key_env":"DASHSCOPE_API_KEY","json":"schema","max_tokens":64000}]'
+   "model":"qwen3.8-max","key_env":"DASHSCOPE_API_KEY","json":"schema","max_tokens":64000,
+   "notes":"先思考再回答，约 4–5 分钟"}]'
 ```
+
+线上（lab.ragents.net）就是这套配置：目录 7 个模型加上面 3 个内置模型。
 
 `VISION_BUILTIN_MODELS` 每个条目：`id`（小写短名）、`name`、`api`（`chat` | `responses` | `anthropic`）、`url`（https）、`model`、`key_env`（存放 Key 的环境变量名）、`json`（`schema` | `object` | `prompt`，默认 `prompt`）、`auth`（`bearer` | `x-api-key`）、`max_tokens`、`notes`（显示在设置页）、`extra`（合并进请求体的 JSON 对象，不能覆盖 `model`、`messages` 等字段；例如 DeepSeek 关闭思考：`{"thinking":{"type":"disabled"}}`，同一张演示图从约 35 秒降到约 10 秒）。缺 Key 或格式不对的条目会被跳过并写入日志。改完 `.env` 后重启 API 容器生效。
 
@@ -193,6 +211,24 @@ VISION_BUILTIN_MODELS='[
      -d '{"model":"gemini-4-argon","messages":[{"role":"user","content":"ping"}],"max_tokens":20}'
    curl -s https://aihubmix.com/v1/models -H "Authorization: Bearer $AIHUBMIX_API_KEY" | head -c 500
    ```
+
+### 模型实测（2026-11-09）
+
+工程图纸用途，Claude Opus 5.5 作评判。演示板用仓库里已审定的细则（6 条，跑 2 次）；支架用服务器上的草稿细则（13 条），分数仅供参考，细则审定后需重测。
+
+| 模型 | 演示板 | 支架 | 支架耗时 | 备注 |
+| --- | --- | --- | --- | --- |
+| Claude Opus 5.5 | 100 / 100 | 96.2 | ≈ 3 分钟 | 默认评判模型 |
+| Gemini 4 Argon | 100 / 100 | 96.2 | ≈ 2 分钟 | 还原图尺寸警告较多 |
+| GPT-6 Astra | 75 / 75 | 88.5 | ≈ 7 分钟 | 还原图与标注最一致 |
+| Qwen3.8 Max（内置） | 100 | 76.9 | ≈ 7.5 分钟 | 先思考再回答 |
+| Kimi K3.1 Pro | 100 / 100 | 76.9 | ≈ 5 分钟 | 需 64k 输出 token |
+| MiniMax M3 | 100 / 100 | 69.2 | ≈ 7 分钟 | 需 64k 输出 token |
+| Seed 2.1 Turbo | 67 / 75 | 57.7 | ≈ 11 分钟 | |
+| DeepSeek V4.1 Flash | 92 / 100 | 53.8 | ≈ 2 分钟 | 关闭思考时约 10 秒 |
+| GLM-5V Turbo | 83 / 92 | 42.3 | ≈ 3 分钟 | |
+
+数据图表用途（4 根柱子的柱状图）：Claude、GPT、Gemini、DeepSeek 都读对全部数值。还原 DXF：Claude、GPT、Gemini 都能生成。
 
 ## 图像理解的用途与提示词
 
