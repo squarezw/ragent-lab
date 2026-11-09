@@ -219,7 +219,7 @@ export default function StepUnderstand({
             )}
             {done.length > 0 && kind === "engineering" && (
               <button type="button" className="text-button" onClick={onNext}>
-                下一步：还原 →
+                下一步：还原 DXF →
               </button>
             )}
           </div>

@@ -52,7 +52,7 @@ test("mobile navigation and vision workbench have no horizontal overflow", async
     page.getByRole("navigation", { name: "实验步骤" }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "② 理解对比" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "③ 还原" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "③ 还原 DXF" })).toBeDisabled();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -401,7 +401,7 @@ test("vision: understand two models, score, redraw and download", async ({
   await expect(viewer).toContainText('"drawing_number": "D-1"');
   await page.keyboard.press("Escape");
   await expect(viewer).toHaveCount(0);
-  await page.getByRole("button", { name: "③ 还原" }).click();
+  await page.getByRole("button", { name: "③ 还原 DXF" }).click();
   await expect(page.getByLabel("理解来源")).toHaveValue("catalog:vendor/model-a");
   await expect(page.getByLabel("生成模型")).toHaveValue("catalog:vendor/model-a");
   await page.getByRole("button", { name: "生成还原图" }).click();
@@ -613,8 +613,9 @@ test("vision: a chart purpose with an edited prompt skips redraw", async ({
   expect(bodies[0]).toMatchObject({ purpose: "chart", prompt: "只读出每根柱子的数值" });
   await expect(cards.first()).toContainText("Q3 最高");
   await expect(page.getByText("用途：数据图表")).toBeVisible();
-  await expect(page.getByRole("button", { name: /还原（仅工程图纸）/ })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "下一步：还原 →" })).toHaveCount(0);
+  // Other purposes have no redraw step at all.
+  await expect(page.getByRole("button", { name: /③/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /下一步：还原/ })).toHaveCount(0);
   await page.getByRole("button", { name: "生成一致性对照" }).click();
   await expect(page.locator(".vision-consensus th").nth(1)).toHaveText("类别", {
     timeout: 20000,

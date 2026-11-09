@@ -56,6 +56,30 @@ class DxfTest(unittest.TestCase):
 
 
 class SvgPdfTest(unittest.TestCase):
+    def test_dxf_dimensions_use_mm_style(self):
+        """R128 must read 128 in CAD: no style may scale lengths (ezdxf's own use x100)."""
+        g = Geometry.model_validate({'units': 'mm', 'sheet': {'width': 400, 'height': 300},
+                                     'entities': [
+            {'type': 'circle', 'layer': 'OUTLINE', 'center': [150, 150], 'radius': 128},
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'radius', 'p1': [150, 150],
+             'p2': [278, 150], 'location': [300, 200]},
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'linear', 'p1': [0, 0],
+             'p2': [390, 0], 'location': [195, -20]},
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'diameter', 'p1': [131, 150],
+             'p2': [169, 150], 'location': [150, 150]}]})
+        doc = ezdxf.read(io.StringIO(render.to_dxf(render.build_doc(g)).decode('utf-8')))
+        self.assertEqual(doc.header['$INSUNITS'], 4)  # millimetres
+        self.assertEqual(doc.header['$DIMSTYLE'], render.DIM_STYLE)
+        self.assertEqual({ds.dxf.get('dimlfac', 1.0) for ds in doc.dimstyles}, {1.0})
+        dims = list(doc.modelspace().query('DIMENSION'))
+        self.assertEqual(len(dims), 3)
+        texts = []
+        for d in dims:
+            self.assertEqual(d.dxf.dimstyle, render.DIM_STYLE)
+            block = doc.blocks.get(d.dxf.geometry)
+            texts += [t.plain_text() for t in block.query('MTEXT')]
+        self.assertEqual(sorted(texts), ['390', 'R128', 'Ø38'])
+
     def test_svg_and_pdf_render(self):
         geometry = _geometry()
         doc = render.build_doc(geometry)

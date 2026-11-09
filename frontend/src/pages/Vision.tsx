@@ -482,11 +482,9 @@ export default function Vision() {
   const steps = [
     { step: 1 as const, label: "① 选图", enabled: true },
     { step: 2 as const, label: "② 理解对比", enabled: !!state.image },
-    {
-      step: 3 as const,
-      label: kind === "engineering" ? "③ 还原" : "③ 还原（仅工程图纸）",
-      enabled: hasDone && kind === "engineering",
-    },
+    ...(kind === "engineering"
+      ? [{ step: 3 as const, label: "③ 还原 DXF", enabled: hasDone }]
+      : []),
   ];
   const go = (step: 1 | 2 | 3) => {
     setActionError("");
@@ -580,7 +578,7 @@ export default function Vision() {
           onNext={() => go(3)}
         />
       )}
-      {state.step === 3 && (
+      {state.step === 3 && kind === "engineering" && (
         <StepRedraw
           models={available}
           runs={state.runs}
