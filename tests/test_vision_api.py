@@ -16,7 +16,9 @@ from PIL import Image
 from ragent_lab.api.app import app
 from ragent_lab.vision import images as images_mod
 
-KEY = 'sk-fixture-abc123'
+KEY = 'sk-fixture-abc123'  # the server's catalog key in these tests
+CODE = 'lab-code'
+SERVER_ENV = {'AIHUBMIX_API_KEY': KEY, 'LAB_ACCESS_CODE': CODE, 'VISION_BUILTIN_PER_HOUR': '1000'}
 MODEL = 'anthropic/claude-opus-5.5'
 UNDERSTANDING = {'part': {'name': '测试件'}, 'views': [], 'dimensions': []}
 GEOMETRY = {'units': 'mm', 'sheet': {'width': 297, 'height': 210}, 'entities': [
@@ -81,7 +83,8 @@ class VisionAPITests(unittest.TestCase):
             p = patch(f'ragent_lab.api.vision.service.{name}', fake)
             p.start()
             self.addCleanup(p.stop)
-        p = patch('ragent_lab.api.vision.model_prices', _fake_prices)
+        from ragent_lab.vision.builtin import Builtins
+        p = patch('ragent_lab.api.vision.builtins', Builtins(SERVER_ENV))
         p.start()
         self.addCleanup(p.stop)
 
@@ -104,9 +107,9 @@ class VisionAPITests(unittest.TestCase):
     def test_models_and_samples(self):
         with TestClient(app) as client:
             models = client.get('/api/vision/models').json()
-            self.assertEqual(len(models), 8)
-            self.assertEqual(set(models[0]), {'id', 'name', 'family', 'notes', 'params', 'price',
-                                             'gateways'})
+            self.assertEqual(len(models), 7)
+            self.assertEqual(set(models[0]), {'id', 'name', 'family', 'notes', 'params'})
+            self.assertNotIn('aihubmix', json.dumps(models).lower())
             self.assertEqual(set(models[0]['params']), {'max_tokens', 'temperature', 'reasoning'})
             self.assertEqual(client.get('/api/vision/judge').json()['id'], MODEL)
             samples = {s['id']: s for s in client.get('/api/vision/samples').json()}
@@ -127,7 +130,7 @@ class VisionAPITests(unittest.TestCase):
             self.assertEqual(client.get(f"/api/vision/images/{body['image_id']}").headers['content-type'],
                              'image/png')
             r = client.post('/api/vision/understand', json={
-                'image': {'kind': 'upload', 'id': body['image_id']}, 'model': MODEL, 'api_key': KEY})
+                'image': {'kind': 'upload', 'id': body['image_id']}, 'model': MODEL, 'access_code': CODE})
             self.assertEqual(r.status_code, 200, r.text)
             texts.append(r.text)
             job, polled = self._wait(client, r.json()['job_id'])
@@ -135,96 +138,86 @@ class VisionAPITests(unittest.TestCase):
             self.assertEqual(job['status'], 'done')
             self.assertIn('understanding', job['result'])
             r = client.post('/api/vision/understand', json={
-                'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'api_key': KEY})
+                'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'access_code': CODE})
             self.assertEqual(r.status_code, 200)
             self.assertTrue(all(KEY not in t for t in texts))
 
     def test_score_consensus_generate_jobs(self):
         with TestClient(app) as client:
             r = client.post('/api/vision/score', json={
-                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'api_key': KEY})
+                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'access_code': CODE})
             job, _ = self._wait(client, r.json()['job_id'])
             self.assertEqual(job['result']['score'], 100.0)
             self.assertEqual(job['result']['meta']['judge'], 'anthropic/claude-opus-5.5')
             r = client.post('/api/vision/score', json={
-                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'api_key': KEY,
-                'judge_model': 'qwen/qwen3.8-max-prime'})
+                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'access_code': CODE,
+                'judge_model': 'openai/gpt-6-astra'})
             job, _ = self._wait(client, r.json()['job_id'])
-            self.assertEqual(job['result']['meta']['judge'], 'qwen/qwen3.8-max-prime')
+            self.assertEqual(job['result']['meta']['judge'], 'openai/gpt-6-astra')
             two = [{'model_name': 'A', 'understanding': UNDERSTANDING},
                    {'model_name': 'B', 'understanding': UNDERSTANDING}]
-            r = client.post('/api/vision/consensus', json={'results': two, 'api_key': KEY})
+            r = client.post('/api/vision/consensus', json={'results': two, 'access_code': CODE})
             self.assertEqual(self._wait(client, r.json()['job_id'])[0]['status'], 'done')
             r = client.post('/api/vision/consensus', json={
-                'results': two, 'api_key': KEY, 'judge_model': 'google/gemini-4-argon'})
+                'results': two, 'access_code': CODE, 'judge_model': 'google/gemini-4-argon'})
             job, _ = self._wait(client, r.json()['job_id'])
             self.assertEqual(job['result']['meta']['judge'], 'google/gemini-4-argon')
             for path, extra in (('score', {'sample_id': 'ok', 'understanding': UNDERSTANDING}),
                                 ('consensus', {'results': two})):
                 r = client.post(f'/api/vision/{path}', json={
-                    **extra, 'api_key': KEY, 'judge_model': 'x/unknown'})
+                    **extra, 'access_code': CODE, 'judge_model': 'x/unknown'})
                 self.assertEqual(r.status_code, 422)
                 self.assertIn('未知评判模型', r.text)
-            r = client.post('/api/vision/consensus', json={'results': two[:1], 'api_key': KEY})
+            r = client.post('/api/vision/consensus', json={'results': two[:1], 'access_code': CODE})
             self.assertEqual(r.status_code, 422)
             r = client.post('/api/vision/generate', json={
                 'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL,
-                'understanding': UNDERSTANDING, 'api_key': KEY})
+                'understanding': UNDERSTANDING, 'access_code': CODE})
             job, polled = self._wait(client, r.json()['job_id'])
             self.assertEqual(job['status'], 'done', job)
             self.assertEqual(set(job['result']), {'geometry', 'svg', 'warnings', 'skipped', 'meta'})
             self.assertIn('<svg', job['result']['svg'])
             self.assertTrue(all(KEY not in t for t in polled))
 
-    def test_missing_key_and_unknown_model_rejected(self):
+    def test_catalog_needs_the_access_code(self):
         with TestClient(app) as client:
             img = {'kind': 'sample', 'id': 'ok'}
             r = client.post('/api/vision/understand', json={'image': img, 'model': MODEL})
             self.assertEqual(r.status_code, 422)
-            r = client.post('/api/vision/understand', json={'image': img, 'model': MODEL, 'api_key': ''})
-            self.assertEqual(r.status_code, 422)
-            self.assertIn('请填写 OpenRouter Key', r.text)
-            r = client.post('/api/vision/understand', json={'image': img, 'model': 'x/unknown', 'api_key': KEY})
+            self.assertIn('访问码', r.json()['detail'])
+            r = client.post('/api/vision/understand', json={
+                'image': img, 'model': MODEL, 'access_code': 'nope'})
+            self.assertEqual(r.status_code, 403)
+            r = client.post('/api/vision/understand', json={
+                'image': img, 'model': 'x/unknown', 'access_code': CODE})
             self.assertEqual(r.status_code, 422)
             self.assertIn('未知模型', r.text)
-            self.assertNotIn(KEY, r.text)
+            # Old clients that still send a platform or their own key are refused.
+            for extra in ({'gateway': 'openrouter'}, {'api_key': 'sk-mine'}):
+                r = client.post('/api/vision/understand', json={
+                    'image': img, 'model': MODEL, 'access_code': CODE, **extra})
+                self.assertEqual(r.status_code, 422)
             r = client.post('/api/vision/understand', json={
-                'image': img, 'model': MODEL, 'api_key': KEY, 'extra': 1})
-            self.assertEqual(r.status_code, 422)
-            self.assertNotIn(KEY, r.text)
+                'image': img, 'model': {'source': 'catalog', 'id': MODEL}, 'access_code': CODE})
+            job, polled = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['result']['meta']['gateway'], 'catalog')
+            self.assertEqual(SEEN_KEYS[-1], KEY)
+            self.assertTrue(all(KEY not in t for t in polled))
 
-    def test_kie_gateway(self):
-        with TestClient(app) as client:
-            models = {m['id']: m for m in client.get('/api/vision/models').json()}
-            self.assertEqual(models[MODEL]['gateways'], ['openrouter', 'kie'])
-            self.assertEqual(models['qwen/qwen3.8-max-prime']['gateways'], ['openrouter'])
-            img = {'kind': 'sample', 'id': 'ok'}
+    def test_catalog_hidden_without_server_key(self):
+        from ragent_lab.vision.builtin import Builtins
+        with patch('ragent_lab.api.vision.builtins', Builtins({'LAB_ACCESS_CODE': CODE})), \
+                TestClient(app) as client:
+            self.assertEqual(client.get('/api/vision/models').json(), [])
             r = client.post('/api/vision/understand', json={
-                'image': img, 'model': MODEL, 'api_key': KEY, 'gateway': 'kie'})
-            job, _ = self._wait(client, r.json()['job_id'])
-            self.assertEqual(job['result']['meta']['gateway'], 'kie')
-            r = client.post('/api/vision/understand', json={
-                'image': img, 'model': 'qwen/qwen3.8-max-prime', 'api_key': KEY, 'gateway': 'kie'})
+                'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'access_code': CODE})
             self.assertEqual(r.status_code, 422)
-            self.assertIn('不支持 Kie.ai', r.text)
-            r = client.post('/api/vision/score', json={
-                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'api_key': KEY,
-                'gateway': 'kie', 'judge_model': 'z-ai/glm-5v-turbo'})
-            self.assertEqual(r.status_code, 422)
-            self.assertIn('不支持 Kie.ai', r.text)
-            r = client.post('/api/vision/understand', json={'image': img, 'model': MODEL,
-                                                             'gateway': 'kie'})
-            self.assertIn('请填写 Kie.ai Key', r.text)
-            r = client.post('/api/vision/understand', json={
-                'image': img, 'model': MODEL, 'api_key': KEY, 'gateway': 'other'})
-            self.assertEqual(r.status_code, 422)
-            self.assertNotIn(KEY, r.text)
 
     def test_score_requires_approved_rubric(self):
         with TestClient(app) as client:
             for sid in ('dr', 'nope'):
                 r = client.post('/api/vision/score', json={
-                    'sample_id': sid, 'understanding': UNDERSTANDING, 'api_key': KEY})
+                    'sample_id': sid, 'understanding': UNDERSTANDING, 'access_code': CODE})
                 self.assertEqual(r.status_code, 422)
 
     def test_export_pdf_and_dxf(self):
@@ -269,7 +262,7 @@ class VisionAPITests(unittest.TestCase):
             self.assertEqual(r.status_code, 404)
             self.assertIn('图片已过期，请重新上传。', r.text)
             r = client.post('/api/vision/understand', json={
-                'image': {'kind': 'upload', 'id': 'gone'}, 'model': MODEL, 'api_key': KEY})
+                'image': {'kind': 'upload', 'id': 'gone'}, 'model': MODEL, 'access_code': CODE})
             self.assertEqual(r.status_code, 404)
 
     def test_upload_too_large_and_bad_file_rejected(self):
@@ -292,7 +285,7 @@ class PurposeAPITests(unittest.TestCase):
 
     def _understand(self, client, **extra):
         return client.post('/api/vision/understand', json={
-            'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'api_key': KEY, **extra})
+            'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'access_code': CODE, **extra})
 
     def test_lists_purposes_with_default_prompts(self):
         with TestClient(app) as client:
@@ -324,20 +317,20 @@ class PurposeAPITests(unittest.TestCase):
             self.assertEqual(samples['ok']['kind'], 'engineering')
             # The sample's rubric grades engineering output; a general result cannot be scored.
             r = client.post('/api/vision/score', json={
-                'sample_id': 'ok', 'understanding': GENERAL, 'api_key': KEY})
+                'sample_id': 'ok', 'understanding': GENERAL, 'access_code': CODE})
             self.assertEqual(r.status_code, 422)
             self.assertIn('用途', r.json()['detail'])
             two = [{'model_name': 'A', 'understanding': GENERAL},
                    {'model_name': 'B', 'understanding': GENERAL}]
-            r = client.post('/api/vision/consensus', json={'results': two, 'api_key': KEY})
+            r = client.post('/api/vision/consensus', json={'results': two, 'access_code': CODE})
             self.assertEqual(r.status_code, 200, r.text)
             mixed = [two[0], {'model_name': 'B', 'understanding': UNDERSTANDING}]
-            r = client.post('/api/vision/consensus', json={'results': mixed, 'api_key': KEY})
+            r = client.post('/api/vision/consensus', json={'results': mixed, 'access_code': CODE})
             self.assertEqual(r.status_code, 422)
             # Redraw stays engineering-only.
             r = client.post('/api/vision/generate', json={
                 'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL,
-                'understanding': GENERAL, 'api_key': KEY})
+                'understanding': GENERAL, 'access_code': CODE})
             self.assertEqual(r.status_code, 422)
 
 
@@ -356,7 +349,7 @@ class CancelAPITests(unittest.TestCase):
 
         with patch('ragent_lab.api.vision.service.understand', hang), TestClient(app) as client:
             r = client.post('/api/vision/understand', json={
-                'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'api_key': KEY})
+                'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'access_code': CODE})
             jid = r.json()['job_id']
             for _ in range(50):
                 if started:
@@ -429,10 +422,6 @@ class RenderBoundTests(unittest.TestCase):
             self.assertIn('导出繁忙或超时，请稍后重试。', r.text)
 
 
-async def _fake_prices():
-    return {}
-
-
 if __name__ == '__main__':
     unittest.main()
 
@@ -446,7 +435,7 @@ BUILTIN_ENV = {
 
 
 class ModelRefAPITests(unittest.TestCase):
-    """The model / judge references: catalog via a platform, built-in, custom endpoint."""
+    """The model / judge references: built-in and custom endpoint."""
 
     _wait = VisionAPITests._wait
 
@@ -462,57 +451,12 @@ class ModelRefAPITests(unittest.TestCase):
         return client.post('/api/vision/understand', json={
             'image': {'kind': 'sample', 'id': 'ok'}, 'model': model, **extra})
 
-    def test_catalog_ref_carries_its_own_key(self):
-        with TestClient(app) as client:
-            r = self._understand(client, {'source': 'catalog', 'id': MODEL, 'gateway': 'kie',
-                                          'api_key': 'kie-key'})
-            job, polled = self._wait(client, r.json()['job_id'])
-            self.assertEqual(job['result']['meta']['gateway'], 'kie')
-            self.assertEqual(SEEN_KEYS, ['kie-key'])
-            self.assertTrue(all('kie-key' not in t for t in polled))
-            r = self._understand(client, {'source': 'catalog', 'id': 'qwen/qwen3.8-max-prime',
-                                          'gateway': 'kie', 'api_key': 'k'})
-            self.assertIn('不支持 Kie.ai', r.text)
-            r = self._understand(client, {'source': 'catalog', 'id': MODEL})
-            self.assertIn('请填写 OpenRouter Key', r.text)
-
-    def test_server_platform_key_with_access_code(self):
-        from ragent_lab.vision.builtin import Builtins
-        env = {**BUILTIN_ENV, 'OPENROUTER_API_KEY': 'sk-or-server', 'VISION_BUILTIN_PER_HOUR': '3'}
-        with patch('ragent_lab.api.vision.builtins', Builtins(env)), TestClient(app) as client:
-            info = client.get('/api/vision/builtin').json()
-            self.assertEqual(info['platforms'], ['openrouter'])
-            self.assertNotIn('sk-or-server', json.dumps(info))
-            ref = {'source': 'catalog', 'id': MODEL, 'gateway': 'openrouter'}
-            # No key and no code: asked for either.
-            r = self._understand(client, ref)
-            self.assertEqual(r.status_code, 422)
-            self.assertIn('访问码', r.json()['detail'])
-            self.assertEqual(self._understand(client, ref, access_code='nope').status_code, 403)
-            r = self._understand(client, ref, access_code='open-sesame')
-            job, polled = self._wait(client, r.json()['job_id'])
-            self.assertEqual(SEEN_KEYS[-1], 'sk-or-server')
-            self.assertTrue(all('sk-or-server' not in t for t in polled))
-            # The visitor's own key wins and does not count toward the hourly limit.
-            r = self._understand(client, {**ref, 'api_key': 'mine'}, access_code='open-sesame')
-            self._wait(client, r.json()['job_id'])
-            self.assertEqual(SEEN_KEYS[-1], 'mine')
-            # Kie.ai has no server key here; the judge uses the same rule.
-            r = self._understand(client, {**ref, 'gateway': 'kie'}, access_code='open-sesame')
-            self.assertIn('请填写 Kie.ai Key', r.text)
-            r = client.post('/api/vision/score', json={
-                'sample_id': 'ok', 'understanding': UNDERSTANDING, 'judge': ref,
-                'access_code': 'open-sesame'})
-            self.assertEqual(r.status_code, 200, r.text)
-            self.assertEqual(self._understand(client, ref, access_code='open-sesame').status_code, 200)
-            r = self._understand(client, ref, access_code='open-sesame')
-            self.assertEqual(r.status_code, 429)
-
     def test_builtin_needs_access_code_and_is_rate_limited(self):
         with TestClient(app) as client:
             listed = client.get('/api/vision/builtin').json()
             self.assertEqual(listed['models'], [{'id': 'deepseek', 'name': 'DeepSeek（内置）',
                                                  'notes': ''}])
+            self.assertEqual(set(listed), {'enabled', 'per_hour', 'models'})
             self.assertNotIn('sk-server-secret', json.dumps(listed))
             self.assertNotIn('api.deepseek.com', json.dumps(listed))
             ref = {'source': 'builtin', 'id': 'deepseek'}
@@ -538,7 +482,7 @@ class ModelRefAPITests(unittest.TestCase):
             self.assertIn('每小时最多调用 2 次', r.text)
             r = self._understand(client, {'source': 'builtin', 'id': 'nope'},
                                  access_code='open-sesame')
-            self.assertIn('该内置模型不可用', r.text)
+            self.assertIn('该模型暂不可用', r.text)
 
     def test_custom_endpoint(self):
         ref = {'source': 'custom', 'name': 'DeepSeek 官方', 'api': 'chat',

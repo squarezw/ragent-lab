@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import string
+import time
 
 from pydantic import BaseModel, ValidationError
 
 from . import prompts
 from .compat import call_endpoint
 from .images import PreparedImage
-from .kie import chat_json as kie_chat_json
-from .openrouter import CallResult, OpenRouterError, chat_json
+from .aihubmix import chat_json as aihubmix_chat_json
+from .calls import CallResult, ModelError
 from .registry import JUDGE_MODEL, get_model
 from .schema import (ConsensusResult, Geometry, Judgement, JudgeResult, Rubric,
                      model_json_schema_for)
@@ -25,14 +27,33 @@ def kind_of(understanding: dict) -> str:
 _POINTS = {'correct': 1.0, 'uncertain': 0.5, 'wrong': 0.0}
 
 
+log = logging.getLogger(__name__)
+
+
 async def _call(gateway: str, api_key: str, model: dict, messages: list[dict],
                 schema_name: str, schema: dict) -> CallResult:
-    """gateway: 'openrouter' | 'kie' (catalog models), 'builtin' | 'custom' (own endpoint)."""
-    if gateway in ('builtin', 'custom'):
-        return await call_endpoint(api_key, model['endpoint'], model, messages,
-                                   schema_name, schema)
-    fn = kie_chat_json if gateway == 'kie' else chat_json
-    return await fn(api_key, model, messages, schema_name, schema)
+    """gateway: 'catalog' (AIHubMix), 'builtin' or 'custom' (the model's own endpoint).
+
+    Logs one line per call (never the key): which model, which upstream, how it went.
+    """
+    started = time.monotonic()
+    try:
+        if gateway in ('builtin', 'custom'):
+            result = await call_endpoint(api_key, model['endpoint'], model, messages,
+                                         schema_name, schema)
+        else:
+            result = await aihubmix_chat_json(api_key, model, messages, schema_name, schema)
+    except ModelError as err:
+        log.warning('vision call failed task=%s model=%s source=%s after=%.1fs kind=%s: %s',
+                    schema_name, model['id'], gateway, time.monotonic() - started,
+                    err.kind, err.message[:200])
+        raise
+    usage = result.usage or {}
+    log.info('vision call ok task=%s model=%s source=%s upstream=%s upstream_model=%s '
+             'took=%.1fs out_tokens=%s finish=%s', schema_name, model['id'], gateway,
+             result.provider, result.model, result.elapsed_ms / 1000,
+             usage.get('completion_tokens') or usage.get('output_tokens'), result.finish_reason)
+    return result
 
 
 def _model(model: str | dict) -> dict:
@@ -40,7 +61,7 @@ def _model(model: str | dict) -> dict:
     return model if isinstance(model, dict) else get_model(model)
 
 
-def _meta(call: CallResult, model: dict, gateway: str = 'openrouter') -> dict:
+def _meta(call: CallResult, model: dict, gateway: str = 'catalog') -> dict:
     return {
         'gateway': gateway, 'model': call.model, 'provider': call.provider,
         'finish_reason': call.finish_reason, 'usage': call.usage, 'cost': call.cost,
@@ -55,7 +76,7 @@ def _validate(cls: type[BaseModel], content: dict) -> BaseModel:
     try:
         return cls.model_validate(content)
     except ValidationError:
-        raise OpenRouterError('invalid_output', '输出不符合约定结构。') from None
+        raise ModelError('invalid_output', '输出不符合约定结构。') from None
 
 
 def _image_part(image: PreparedImage) -> dict:
@@ -68,7 +89,7 @@ def _dumps(obj) -> str:
 
 
 async def understand(api_key: str, model_id: str | dict, image: PreparedImage,
-                     gateway: str = 'openrouter', purpose: str = prompts.DEFAULT_PURPOSE,
+                     gateway: str = 'catalog', purpose: str = prompts.DEFAULT_PURPOSE,
                      instructions: str | None = None) -> dict:
     """instructions replace the purpose's default prompt; the fixed rules and schema stay."""
     model = _model(model_id)
@@ -84,7 +105,7 @@ async def understand(api_key: str, model_id: str | dict, image: PreparedImage,
 
 
 async def generate(api_key: str, model_id: str | dict, image: PreparedImage,
-                   understanding: dict, gateway: str = 'openrouter') -> dict:
+                   understanding: dict, gateway: str = 'catalog') -> dict:
     model = _model(model_id)
     text = prompts.GENERATE + '\n\n理解 JSON：\n' + _dumps(understanding)
     messages = [{'role': 'user', 'content': [
@@ -109,7 +130,7 @@ def compute_score(rubric: Rubric, judgements: list[Judgement]) -> tuple[float, d
 
 
 async def score(api_key: str, rubric: Rubric, understanding: dict,
-                judge: dict = JUDGE_MODEL, gateway: str = 'openrouter') -> dict:
+                judge: dict = JUDGE_MODEL, gateway: str = 'catalog') -> dict:
     # Raised before any model call; the caller should never submit such a rubric.
     if rubric.rubric_status != 'approved':
         raise ValueError('rubric is not approved; scoring is disabled')
@@ -127,7 +148,7 @@ async def score(api_key: str, rubric: Rubric, understanding: dict,
     expected = [i.id for i in rubric.items]
     got = [j.item_id for j in parsed.judgements]
     if len(got) != len(set(got)) or set(got) != set(expected):
-        raise OpenRouterError('invalid_output', '判定结果不完整，请重试评分。')
+        raise ModelError('invalid_output', '判定结果不完整，请重试评分。')
     order = {item_id: n for n, item_id in enumerate(expected)}
     judgements = sorted(parsed.judgements, key=lambda j: order[j.item_id])
     value, counts = compute_score(rubric, judgements)
@@ -139,12 +160,12 @@ async def score(api_key: str, rubric: Rubric, understanding: dict,
 def _letter(raw: str, mapping: dict[str, str]) -> str:
     key = raw.strip().removeprefix('模型').strip().upper()
     if key not in mapping:
-        raise OpenRouterError('invalid_output', '一致性结果引用了不存在的模型编号。')
+        raise ModelError('invalid_output', '一致性结果引用了不存在的模型编号。')
     return mapping[key]
 
 
 async def consensus(api_key: str, results: list[dict], judge: dict = JUDGE_MODEL,
-                    gateway: str = 'openrouter') -> dict:
+                    gateway: str = 'catalog') -> dict:
     if len(results) > len(string.ascii_uppercase):
         raise ValueError('too many models for consensus')
     kinds = {kind_of(r['understanding']) for r in results}

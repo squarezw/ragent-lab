@@ -296,6 +296,29 @@ class ConsensusResult(BaseModel):
 
 # ---- JSON schema helper --------------------------------------------------
 
+# Keywords Gemini's response_schema rejects. Dropping them loosens only what the model is
+# told; the reply is still validated against the full Pydantic model.
+_LEAN_DROP = {'title', 'default', 'exclusiveMinimum', 'exclusiveMaximum', 'minItems',
+              'maxItems', 'maxLength', 'minLength'}
+
+
+def lean_schema(schema: dict) -> dict:
+    """A copy Gemini accepts: oneOf becomes anyOf, unsupported limit keywords are dropped."""
+    def walk(node, in_properties=False):
+        if isinstance(node, dict):
+            out = {}
+            for k, v in node.items():
+                if not in_properties and k in _LEAN_DROP:
+                    continue
+                out['anyOf' if k == 'oneOf' and not in_properties else k] = \
+                    walk(v, in_properties=(k == 'properties' and not in_properties))
+            return out
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+    return walk(schema)
+
+
 def model_json_schema_for(cls) -> dict:
     """JSON schema for response_format with every $ref inlined (some providers reject $ref).
 
@@ -317,6 +340,9 @@ def model_json_schema_for(cls) -> dict:
                 return {**merged, **extra}
             out = {k: inline(v, seen) for k, v in node.items()
                    if not (k == 'discriminator' and isinstance(v, dict) and 'propertyName' in v)}
+            if 'const' in out:  # Gemini rejects "const"; a one-value enum means the same
+                out.setdefault('enum', [out['const']])
+                del out['const']
             if isinstance(out.get('properties'), dict):
                 out['required'] = list(out['properties'])
             return out

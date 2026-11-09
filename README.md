@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 文本分块 | 可用 | 11 种分块策略，参数可调，提供分块预览和长度统计 |
 | Embedding 对比 | 可用 | 7 个向量模型；按查询相似度排名，用同一组候选文本对比各模型 |
-| 图像理解 | 可用 | 按用途（工程图纸、数据图表、流程图、通用图片或自定义提示词）让多个视觉模型读同一张图，按细则打分、比较一致性；工程图纸还能按理解生成几何并导出 PDF/DXF |
+| 图像理解 | 可用 | 按用途（工程图纸、数据图表、流程图、通用图片或自定义提示词）让多个视觉模型读同一张图，按细则打分、比较一致性；工程图纸还能按理解生成几何并导出 PDF/DXF。一个访问码使用全部模型 |
 
 ## 技术栈
 
@@ -137,26 +137,62 @@ bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 
 ## 图像理解的模型设置
 
-侧栏底部的「模型设置」页决定图像理解页和评判模型里能选哪些模型。设置只存在访客浏览器的 localStorage 里（可选择不保存 Key），服务器不保存任何访客 Key。
+访客只需要一个访问码（`LAB_ACCESS_CODE`）就能用全部服务器模型；页面只显示模型名，不显示由哪个平台提供。侧栏底部的「模型设置」页填访问码、勾选要用的模型；也可以用自己的 Key 接入自定义模型。设置只存在访客浏览器的 localStorage 里（可选择不记住访问码），服务器不保存访客的任何 Key。
 
-- **代理平台**：填 OpenRouter / Kie.ai 的 Key，并为模型目录里的每个模型选择经哪个平台调用（Kie.ai 只提供 Claude、GPT、Gemini、Kimi）。服务器可以配置自己的 OpenRouter / Kie.ai Key（`OPENROUTER_API_KEY`、`KIE_API_KEY`）：访客输入访问码后不填 Key 也能用；访客填了自己的 Key 时优先用自己的，不占服务器额度。
-- **内置模型**：由服务器付费，配置在 API 的环境变量里，访客输入访问码后可用，每个 IP 每小时有调用上限。Key 和接口地址都不会发给浏览器。
-- **自定义模型**：访客自己填接口地址、模型名和 Key。预设可一键填好 OpenRouter、Kie.ai、DeepSeek、Moonshot（Kimi）、阿里云百炼（Qwen）、智谱（GLM）、OpenAI、Anthropic 的地址和格式；支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种格式。服务器只调用公网 https 地址，解析到本机或内网的地址会被拒绝，也不跟随重定向。
+模型分三类，都在服务器上调用，Key 不会发给浏览器：
 
-内置模型的环境变量（见 [env.example](env.example)）：
+- **模型目录**（`src/ragent_lab/vision/registry.py`）：Claude Opus 5.5、GPT-6 Astra、Gemini 4 Argon、GLM-5V Turbo、Kimi K3.1 Pro、Seed 2.1 Turbo、MiniMax M3，全部用服务器的 `AIHUBMIX_API_KEY` 经 AIHubMix 调用（Claude 走原生 Messages 接口，其余走 Chat Completions + JSON Schema）。没有 `AIHUBMIX_API_KEY` 时目录为空。
+- **内置模型**（`VISION_BUILTIN_MODELS`）：直连模型厂商自己的接口，例如 DeepSeek、Qwen（阿里云百炼）。阿里云的 Key 只在创建它的地域和套餐对应的地址上有效：普通百炼 Key 用 `https://dashscope.aliyuncs.com/compatible-mode/v1`，Token Plan 的 `sk-sp-…` Key 用 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；地址不对会返回 401 “Incorrect API key”。
+- **自定义模型**：访客自己填接口地址、模型名和 Key。预设可一键填好 DeepSeek、Moonshot（Kimi）、阿里云百炼（Qwen）、智谱（GLM）、OpenAI、Anthropic 官方接口的地址和格式；支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种格式。服务器只调用公网 https 地址，解析到本机或内网的地址会被拒绝，也不跟随重定向。
+
+目录模型和内置模型共用访问码和每个访客 IP 每小时的调用上限（`VISION_BUILTIN_PER_HOUR`）；连续输错 10 次访问码的 IP 锁定一小时。
+
+环境变量（见 [env.example](env.example)）：
 
 ```bash
-LAB_ACCESS_CODE=choose-a-long-random-code   # 不设置则不开放内置模型和服务器 Key
-VISION_BUILTIN_PER_HOUR=60                   # 每个访客 IP 每小时的调用次数（内置模型和服务器 Key 合计）
-OPENROUTER_API_KEY=sk-or-...                 # 可选：服务器的 OpenRouter Key，凭访问码使用
-KIE_API_KEY=...                              # 可选：服务器的 Kie.ai Key，凭访问码使用
+LAB_ACCESS_CODE=choose-a-long-random-code   # 不设置则不开放任何服务器模型
+VISION_BUILTIN_PER_HOUR=60                   # 每个访客 IP 每小时的调用次数
+AIHUBMIX_API_KEY=sk-...                      # 模型目录用的 Key
 DEEPSEEK_API_KEY=sk-...
-VISION_BUILTIN_MODELS='[{"id":"deepseek","name":"DeepSeek（内置）","api":"chat",
-  "url":"https://api.deepseek.com/chat/completions","model":"<视觉模型名>",
-  "key_env":"DEEPSEEK_API_KEY","json":"object"}]'
+DASHSCOPE_API_KEY=sk-...
+VISION_BUILTIN_MODELS='[
+  {"id":"deepseek-fast","name":"DeepSeek V4.1 Flash（快速）","api":"chat",
+   "url":"https://api.deepseek.com/chat/completions","model":"deepseek-flash",
+   "key_env":"DEEPSEEK_API_KEY","json":"object","extra":{"thinking":{"type":"disabled"}}},
+  {"id":"qwen","name":"Qwen3.8 Max","api":"chat",
+   "url":"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+   "model":"qwen3.8-max","key_env":"DASHSCOPE_API_KEY","json":"schema","max_tokens":64000}]'
 ```
 
-每个条目：`id`（小写短名）、`name`、`api`（`chat` | `responses` | `anthropic`）、`url`（https）、`model`、`key_env`（存放 Key 的环境变量名）、`json`（`schema` | `object` | `prompt`，默认 `prompt`）、`auth`（`bearer` | `x-api-key`）、`max_tokens`、`notes`（显示在设置页）、`extra`（合并进请求体的 JSON 对象，不能覆盖 `model`、`messages` 等字段；例如 DeepSeek 关闭思考：`{"thinking":{"type":"disabled"}}`，同一张演示图从约 35 秒降到约 10 秒）。同一个模型可以配两个条目，一个开思考、一个关思考，方便对比速度和准确度。缺 Key 或格式不对的条目会被跳过并写入日志。改完 `.env` 后重启 API 容器生效。
+`VISION_BUILTIN_MODELS` 每个条目：`id`（小写短名）、`name`、`api`（`chat` | `responses` | `anthropic`）、`url`（https）、`model`、`key_env`（存放 Key 的环境变量名）、`json`（`schema` | `object` | `prompt`，默认 `prompt`）、`auth`（`bearer` | `x-api-key`）、`max_tokens`、`notes`（显示在设置页）、`extra`（合并进请求体的 JSON 对象，不能覆盖 `model`、`messages` 等字段；例如 DeepSeek 关闭思考：`{"thinking":{"type":"disabled"}}`，同一张演示图从约 35 秒降到约 10 秒）。缺 Key 或格式不对的条目会被跳过并写入日志。改完 `.env` 后重启 API 容器生效。
+
+### 调试模型调用
+
+页面不显示模型由谁提供，排查时看这三处：
+
+1. **API 日志**：每次模型调用写一行，不含 Key。
+
+   ```bash
+   docker logs -f ragent-lab-api-1 2>&1 | grep 'vision call'
+   # INFO:     ragent_lab.vision.service vision call ok task=understanding model=anthropic/claude-opus-5.5
+   #           source=catalog upstream=AIHubMix upstream_model=claude-opus-5-5 took=61.2s out_tokens=6718 finish=end_turn
+   # WARNING:  ragent_lab.vision.service vision call failed task=geometry model=google/gemini-4-argon
+   #           source=catalog after=1.3s kind=upstream: AIHubMix 拒绝了请求（400）：…
+   ```
+
+   `task` 是 `understanding`（理解）、`judge_result`（打分）、`consensus_result`（一致性）或 `geometry`（还原）；`source` 是 `catalog`、`builtin` 或 `custom`；`upstream` / `upstream_model` 是实际调用的平台和模型名；失败行的 `kind` 是 `auth`、`credits`、`rate_limit`、`upstream`、`timeout`、`truncated`（输出达到 `max_tokens`）或 `invalid_output`（JSON 不符合结构）。日志级别用 `LAB_LOG_LEVEL` 调（默认 `INFO`）。
+
+2. **导出结果 JSON**：图像理解页「导出结果 JSON」里每个结果的 `meta` 记录 `provider`、`model`、`usage`（token 数）、`finish_reason` 和耗时。
+
+3. **直接调一次接口**：在服务器上用同一个 Key 复现，判断问题在模型平台还是在本项目。
+
+   ```bash
+   set -a; . /opt/rag-lab/current/.env; set +a
+   curl -s https://aihubmix.com/v1/chat/completions -H "Authorization: Bearer $AIHUBMIX_API_KEY" \
+     -H 'Content-Type: application/json' \
+     -d '{"model":"gemini-4-argon","messages":[{"role":"user","content":"ping"}],"max_tokens":20}'
+   curl -s https://aihubmix.com/v1/models -H "Authorization: Bearer $AIHUBMIX_API_KEY" | head -c 500
+   ```
 
 ## 图像理解的用途与提示词
 

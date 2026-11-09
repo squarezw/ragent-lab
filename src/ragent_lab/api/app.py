@@ -1,4 +1,5 @@
 """Run with uvicorn ragent_lab.api.app:app --app-dir src."""
+import logging
 import os
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -10,6 +11,13 @@ from .schemas import ChunkRequest, EmbeddingRequest
 from .services import chunk_text, embed_texts, model_catalog, strategy_catalog
 
 load_dotenv()
+# App logs (e.g. one line per vision model call) go to stderr next to uvicorn's.
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter('%(levelname)s:     %(name)s %(message)s'))
+_app_log = logging.getLogger('ragent_lab')
+_app_log.setLevel(os.getenv('LAB_LOG_LEVEL', 'INFO').upper())
+_app_log.addHandler(_handler)
+_app_log.propagate = False
 app = FastAPI(title='Ragent Lab API', version='2.0.0')
 app.include_router(vision.router)
 

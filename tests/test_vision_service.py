@@ -1,4 +1,4 @@
-"""Vision service tests (chat_json patched; no network)."""
+"""Vision service tests (the AIHubMix call is patched; no network)."""
 import json
 import sys
 import unittest
@@ -8,7 +8,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from ragent_lab.vision import prompts, service
 from ragent_lab.vision.images import PreparedImage
-from ragent_lab.vision.openrouter import CallResult, OpenRouterError
+from ragent_lab.vision.calls import CallResult, ModelError
 from ragent_lab.vision.registry import JUDGE_MODEL, get_model, judge_model
 from ragent_lab.vision.schema import Judgement, Rubric
 
@@ -71,7 +71,7 @@ class ComputeScoreTests(unittest.TestCase):
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_understand_message_has_image_first(self):
         calls = []
-        with mock.patch.object(service, 'chat_json', fake(UNDERSTANDING, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(UNDERSTANDING, calls)):
             out = await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE)
         parts = calls[0]['messages'][-1]['content']
         self.assertEqual(parts[0]['type'], 'image_url')
@@ -82,25 +82,43 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out['understanding']['dimensions'][0]['feature_ids'], ['hole1'])
         self.assertEqual(out['meta']['provider'], 'Prov')
         self.assertEqual(out['meta']['params'],
-                         {'max_tokens': 32000, 'temperature': 0.2, 'reasoning': None})
+                         {'max_tokens': 32000, 'temperature': None, 'reasoning': None})
         self.assertNotIn(KEY, json.dumps(out))
 
+    async def test_each_call_is_logged_without_the_key(self):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(UNDERSTANDING)), \
+                self.assertLogs('ragent_lab.vision.service', level='INFO') as logs:
+            await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE)
+        line = logs.output[0]
+        self.assertIn('vision call ok task=understanding model=z-ai/glm-5v-turbo source=catalog', line)
+        self.assertIn('upstream=Prov', line)
+        self.assertNotIn(KEY, line)
+
+        async def boom(*a, **k):
+            raise ModelError('upstream', 'AIHubMix 拒绝了请求（400）')
+        with mock.patch.object(service, 'aihubmix_chat_json', boom), \
+                self.assertLogs('ragent_lab.vision.service', level='WARNING') as logs, \
+                self.assertRaises(ModelError):
+            await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE)
+        self.assertIn('vision call failed', logs.output[0])
+        self.assertIn('kind=upstream', logs.output[0])
+
     async def test_understand_invalid_structure_is_invalid_output(self):
-        with mock.patch.object(service, 'chat_json', fake({'views': 'oops'})):
-            with self.assertRaises(OpenRouterError) as cm:
+        with mock.patch.object(service, 'aihubmix_chat_json', fake({'views': 'oops'})):
+            with self.assertRaises(ModelError) as cm:
                 await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE)
         self.assertEqual(cm.exception.kind, 'invalid_output')
         self.assertNotIn(KEY, cm.exception.message)
 
     async def test_generate_returns_geometry(self):
         calls = []
-        with mock.patch.object(service, 'chat_json', fake(GEOMETRY, calls)):
-            out = await service.generate(KEY, 'qwen/qwen3.8-max-prime', IMAGE, UNDERSTANDING)
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(GEOMETRY, calls)):
+            out = await service.generate(KEY, 'openai/gpt-6-astra', IMAGE, UNDERSTANDING)
         parts = calls[0]['messages'][-1]['content']
         self.assertEqual(parts[0]['type'], 'image_url')
         self.assertIn('Ø19', parts[1]['text'])
         self.assertEqual(out['geometry']['entities'][0]['dimension_ref'], 'd1')
-        self.assertEqual(out['model_name'], 'Qwen3.8 Max Prime')
+        self.assertEqual(out['model_name'], 'GPT-6 Astra')
 
     async def test_score_uses_judge_and_computes(self):
         calls = []
@@ -108,7 +126,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             {'item_id': 'C01', 'verdict': 'correct', 'evidence': '66'},
             {'item_id': 'C02', 'verdict': 'correct', 'evidence': 'Ø19'},
             {'item_id': 'C03', 'verdict': 'wrong', 'evidence': ''}]}
-        with mock.patch.object(service, 'chat_json', fake(content, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(content, calls)):
             out = await service.score(KEY, RUBRIC, UNDERSTANDING)
         self.assertIs(calls[0]['model'], JUDGE_MODEL)
         self.assertEqual(out['score'], 66.7)
@@ -116,10 +134,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([j['item_id'] for j in out['judgements']], ['C01', 'C02', 'C03'])
         self.assertIn('meta', out)
 
-        qwen = get_model('qwen/qwen3.8-max-prime')
-        with mock.patch.object(service, 'chat_json', fake(content, calls)):
+        qwen = get_model('openai/gpt-6-astra')
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(content, calls)):
             await service.score(KEY, RUBRIC, UNDERSTANDING, qwen)
-        with mock.patch.object(service, 'chat_json', fake({'groups': []}, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake({'groups': []}, calls)):
             await service.consensus(KEY, [{'model_name': 'A', 'understanding': UNDERSTANDING},
                                           {'model_name': 'B', 'understanding': UNDERSTANDING}],
                                     qwen)
@@ -129,14 +147,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_judge_model_lookup(self):
         self.assertIs(judge_model(None), JUDGE_MODEL)
         self.assertIs(judge_model('anthropic/claude-opus-5.5'), JUDGE_MODEL)
-        self.assertIs(judge_model('qwen/qwen3.8-max-prime'), get_model('qwen/qwen3.8-max-prime'))
+        self.assertIs(judge_model('openai/gpt-6-astra'), get_model('openai/gpt-6-astra'))
         with self.assertRaises(KeyError):
             judge_model('x/unknown')
 
     async def test_score_wraps_data_in_delimiters(self):
         calls = []
         content = {'judgements': [{'item_id': i, 'verdict': 'wrong'} for i in ('C01', 'C02', 'C03')]}
-        with mock.patch.object(service, 'chat_json', fake(content, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(content, calls)):
             await service.score(KEY, RUBRIC, UNDERSTANDING)
         text = calls[0]['messages'][-1]['content'][0]['text']
         self.assertLess(text.index('<rubric>'), text.index('</rubric>'))
@@ -147,7 +165,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_score_rejects_draft_rubric_before_call(self):
         calls = []
         draft = RUBRIC.model_copy(update={'rubric_status': 'draft'})
-        with mock.patch.object(service, 'chat_json', fake({}, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake({}, calls)):
             with self.assertRaises(ValueError):
                 await service.score(KEY, draft, UNDERSTANDING)
         self.assertEqual(calls, [])
@@ -155,7 +173,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_score_rejects_empty_rubric_before_call(self):
         calls = []
         empty = RUBRIC.model_copy(update={'items': []})
-        with mock.patch.object(service, 'chat_json', fake({}, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake({}, calls)):
             with self.assertRaises(ValueError):
                 await service.score(KEY, empty, UNDERSTANDING)
         self.assertEqual(calls, [])
@@ -164,8 +182,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         content = {'judgements': [
             {'item_id': 'C01', 'verdict': 'correct'},
             {'item_id': 'C02', 'verdict': 'wrong'}]}
-        with mock.patch.object(service, 'chat_json', fake(content)):
-            with self.assertRaises(OpenRouterError) as cm:
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(content)):
+            with self.assertRaises(ModelError) as cm:
                 await service.score(KEY, RUBRIC, UNDERSTANDING)
         self.assertEqual(cm.exception.kind, 'invalid_output')
 
@@ -175,8 +193,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 {'item_id': 'C01', 'verdict': 'correct'},
                 {'item_id': 'C02', 'verdict': 'wrong'},
                 {'item_id': 'C03', 'verdict': 'wrong'}, extra]}
-            with mock.patch.object(service, 'chat_json', fake(content)):
-                with self.assertRaises(OpenRouterError) as cm:
+            with mock.patch.object(service, 'aihubmix_chat_json', fake(content)):
+                with self.assertRaises(ModelError) as cm:
                     await service.score(KEY, RUBRIC, UNDERSTANDING)
             self.assertEqual(cm.exception.kind, 'invalid_output')
 
@@ -189,7 +207,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         }
         results = [{'model_name': 'Claude Opus 5.5', 'understanding': UNDERSTANDING},
                    {'model_name': 'GPT-6 Astra', 'understanding': UNDERSTANDING}]
-        with mock.patch.object(service, 'chat_json', fake(content, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(content, calls)):
             out = await service.consensus(KEY, results)
         self.assertIs(calls[0]['model'], JUDGE_MODEL)
         sent = json.dumps(calls[0]['messages'], ensure_ascii=False)
@@ -206,8 +224,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             {'summary': 's', 'models': ['C']}]}]}
         results = [{'model_name': 'm1', 'understanding': UNDERSTANDING},
                    {'model_name': 'm2', 'understanding': UNDERSTANDING}]
-        with mock.patch.object(service, 'chat_json', fake(content)):
-            with self.assertRaises(OpenRouterError) as cm:
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(content)):
+            with self.assertRaises(ModelError) as cm:
                 await service.consensus(KEY, results)
         self.assertEqual(cm.exception.kind, 'invalid_output')
 
@@ -239,7 +257,7 @@ class PurposeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_understand_general_purpose(self):
         calls = []
-        with mock.patch.object(service, 'chat_json', fake(GENERAL, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(GENERAL, calls)):
             out = await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE,
                                            purpose='chart', instructions='读出每根柱子')
         text = calls[0]['messages'][-1]['content'][1]['text']
@@ -250,8 +268,8 @@ class PurposeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out['understanding']['texts'], [])
 
     async def test_understand_general_rejects_engineering_shape(self):
-        with mock.patch.object(service, 'chat_json', fake(UNDERSTANDING)):
-            with self.assertRaises(OpenRouterError) as cm:
+        with mock.patch.object(service, 'aihubmix_chat_json', fake(UNDERSTANDING)):
+            with self.assertRaises(ModelError) as cm:
                 await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE, purpose='general')
         self.assertEqual(cm.exception.kind, 'invalid_output')
 
@@ -259,7 +277,7 @@ class PurposeTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         results = [{'model_name': 'A1', 'understanding': GENERAL},
                    {'model_name': 'B1', 'understanding': GENERAL}]
-        with mock.patch.object(service, 'chat_json', fake({'groups': []}, calls)):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake({'groups': []}, calls)):
             await service.consensus(KEY, results)
         text = calls[0]['messages'][-1]['content'][0]['text']
         self.assertTrue(text.startswith(prompts.CONSENSUS_GENERAL))

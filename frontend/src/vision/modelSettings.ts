@@ -1,10 +1,9 @@
-// Visitor model settings: platform keys, built-in access code, which catalog models run on
-// which platform, and custom endpoints. Kept in this browser only (localStorage); the server
-// never stores them. Shared by the settings page and the vision workbench.
+// Visitor model settings: the access code (unlocks every server model), which models are
+// enabled, and custom endpoints. Kept in this browser only (localStorage); the server never
+// stores them. Shared by the settings page and the vision workbench.
 import { useEffect, useState } from "react";
-import { GATEWAY_NAMES, type Gateway, type VisionModel } from "./types";
+import type { VisionModel } from "./types";
 
-export type Platform = Gateway;
 export type WireApi = "chat" | "responses" | "anthropic";
 export type JsonMode = "schema" | "object" | "prompt";
 export type AuthMode = "bearer" | "x-api-key";
@@ -25,11 +24,11 @@ export type CustomModel = {
 
 export type ModelSettings = {
   version: 1;
-  keys: Record<Platform, string>;
+  // Remember the access code and custom-model keys in this browser.
   rememberKeys: boolean;
   accessCode: string;
-  // Catalog models not listed here are enabled and use OpenRouter.
-  catalog: Record<string, { enabled: boolean; via: Platform }>;
+  // Catalog models not listed here are enabled.
+  catalog: Record<string, { enabled: boolean }>;
   // Built-in models not listed here are enabled.
   builtin: Record<string, { enabled: boolean }>;
   custom: CustomModel[];
@@ -39,20 +38,11 @@ export type BuiltinInfo = {
   enabled: boolean;
   per_hour: number;
   models: { id: string; name: string; notes: string }[];
-  // Platforms the server has its own key for, usable with the access code.
-  platforms?: Platform[];
 };
-
-// The server's key for this platform can be used (it has one and the visitor gave the code).
-export const serverKeyFor = (
-  s: ModelSettings,
-  builtin: BuiltinInfo | null,
-  p: Platform,
-) => !!builtin?.platforms?.includes(p) && s.accessCode.trim() !== "";
 
 // What the server needs to call a model. Keys travel only in request bodies.
 export type ModelRef =
-  | { source: "catalog"; id: string; gateway: Platform; api_key: string }
+  | { source: "catalog"; id: string }
   | { source: "builtin"; id: string }
   | ({ source: "custom" } & Omit<CustomModel, "uid" | "preset" | "enabled">);
 
@@ -80,57 +70,6 @@ export type Preset = {
 
 // Presets fill in endpoint and format; the visitor still types the model name and key.
 export const PRESETS: Preset[] = [
-  {
-    id: "openrouter",
-    label: "OpenRouter（任意模型 ID）",
-    api: "chat",
-    url: "https://openrouter.ai/api/v1/chat/completions",
-    json_mode: "schema",
-    auth: "bearer",
-    modelHint: "例如 qwen/qwen3.8-max-prime",
-    keyUrl: "https://openrouter.ai/keys",
-  },
-  {
-    id: "kie-claude",
-    label: "Kie.ai · Claude",
-    api: "anthropic",
-    url: "https://api.kie.ai/claude/v1/messages",
-    json_mode: "prompt",
-    auth: "bearer",
-    modelHint: "例如 claude-sonnet-5-5",
-    keyUrl: "https://kie.ai/api-key",
-  },
-  {
-    id: "kie-gpt",
-    label: "Kie.ai · GPT（Codex 接口）",
-    api: "responses",
-    url: "https://api.kie.ai/codex/v1/responses",
-    json_mode: "schema",
-    auth: "bearer",
-    modelHint: "例如 gpt-6-luna",
-    keyUrl: "https://kie.ai/api-key",
-  },
-  {
-    id: "kie-responses",
-    label: "Kie.ai · Kimi / DeepSeek / Grok",
-    api: "responses",
-    url: "https://api.kie.ai/openai/v1/responses",
-    json_mode: "schema",
-    auth: "bearer",
-    modelHint: "例如 deepseek-v4-1-flash",
-    keyUrl: "https://kie.ai/api-key",
-  },
-  {
-    id: "kie-gemini",
-    label: "Kie.ai · Gemini",
-    api: "chat",
-    url: "https://api.kie.ai/gemini-3-8-flash-openai/v1/chat/completions",
-    json_mode: "prompt",
-    auth: "bearer",
-    modelHint: "留空（模型由地址决定）",
-    keyUrl: "https://kie.ai/api-key",
-    note: "Kie.ai 的 Gemini 每个模型一个地址，把地址中的 gemini-3-8-flash 换成要用的模型。",
-  },
   {
     id: "deepseek",
     label: "DeepSeek 官方",
@@ -204,7 +143,6 @@ export const PRESETS: Preset[] = [
 
 export const DEFAULT_SETTINGS: ModelSettings = {
   version: 1,
-  keys: { openrouter: "", kie: "" },
   rememberKeys: true,
   accessCode: "",
   catalog: {},
@@ -213,10 +151,6 @@ export const DEFAULT_SETTINGS: ModelSettings = {
 };
 
 const STORAGE = "lab-model-settings";
-const LEGACY_KEYS: Record<Platform, string> = {
-  openrouter: "vision-openrouter-key",
-  kie: "vision-kie-key",
-};
 
 function read(name: string): string | null {
   try {
@@ -232,12 +166,7 @@ function isObj(v: unknown): v is Record<string, unknown> {
 
 export function parseSettings(raw: string | null): ModelSettings {
   const base: ModelSettings = structuredClone(DEFAULT_SETTINGS);
-  if (!raw) {
-    // First visit after the settings page shipped: carry over keys saved by the old form.
-    for (const p of ["openrouter", "kie"] as Platform[])
-      base.keys[p] = read(LEGACY_KEYS[p]) ?? "";
-    return base;
-  }
+  if (!raw) return base;
   let data: unknown;
   try {
     data = JSON.parse(raw);
@@ -245,17 +174,17 @@ export function parseSettings(raw: string | null): ModelSettings {
     return base;
   }
   if (!isObj(data)) return base;
-  const keys = isObj(data.keys) ? data.keys : {};
   return {
     version: 1,
-    keys: {
-      openrouter: typeof keys.openrouter === "string" ? keys.openrouter : "",
-      kie: typeof keys.kie === "string" ? keys.kie : "",
-    },
     rememberKeys: data.rememberKeys !== false,
     accessCode: typeof data.accessCode === "string" ? data.accessCode : "",
     catalog: isObj(data.catalog)
-      ? (data.catalog as ModelSettings["catalog"])
+      ? Object.fromEntries(
+          Object.entries(data.catalog).map(([id, v]) => [
+            id,
+            { enabled: !(isObj(v) && v.enabled === false) },
+          ]),
+        )
       : {},
     builtin: isObj(data.builtin)
       ? (data.builtin as ModelSettings["builtin"])
@@ -273,7 +202,6 @@ export function storedForm(s: ModelSettings): ModelSettings {
   if (s.rememberKeys) return s;
   return {
     ...s,
-    keys: { openrouter: "", kie: "" },
     accessCode: "",
     custom: s.custom.map((c) => ({ ...c, api_key: "" })),
   };
@@ -291,8 +219,6 @@ export function saveSettings(next: ModelSettings): void {
   current = next;
   try {
     localStorage.setItem(STORAGE, JSON.stringify(storedForm(next)));
-    for (const p of ["openrouter", "kie"] as Platform[])
-      localStorage.removeItem(LEGACY_KEYS[p]);
   } catch {
     /* storage unavailable: settings last for this page view */
   }
@@ -314,11 +240,8 @@ export function useModelSettings(): [
   return [settings, (update) => saveSettings(update(current))];
 }
 
-export function catalogChoice(s: ModelSettings, m: VisionModel) {
-  const saved = s.catalog[m.id];
-  const served = m.gateways ?? ["openrouter"];
-  const via = saved && served.includes(saved.via) ? saved.via : served[0];
-  return { enabled: saved?.enabled ?? true, via };
+export function catalogEnabled(s: ModelSettings, m: VisionModel): boolean {
+  return s.catalog[m.id]?.enabled ?? true;
 }
 
 export function hostOf(url: string): string {
@@ -330,6 +253,7 @@ export function hostOf(url: string): string {
 }
 
 // Every model the visitor can pick, in display order: catalog, built-in, custom.
+// Catalog and built-in models both run on the server and need only the access code.
 export function buildOptions(
   s: ModelSettings,
   catalog: VisionModel[],
@@ -337,39 +261,29 @@ export function buildOptions(
   { includeDisabled = false } = {},
 ): ModelOption[] {
   const out: ModelOption[] = [];
+  const code = s.accessCode.trim() !== "";
   for (const m of catalog) {
-    const { enabled, via } = catalogChoice(s, m);
+    const enabled = catalogEnabled(s, m);
     if (!enabled && !includeDisabled) continue;
-    const key = s.keys[via];
-    const own = key.trim() !== "";
-    // Without a key of their own, the request goes out with the access code instead.
-    const server = !own && serverKeyFor(s, builtin, via);
-    const offered = !!builtin?.platforms?.includes(via);
     out.push({
       key: `catalog:${m.id}`,
       name: m.name,
       source: "catalog",
-      badge: server ? `${GATEWAY_NAMES[via]} · 服务器 Key` : GATEWAY_NAMES[via],
-      ready: enabled && (own || server),
-      problem:
-        own || server
-          ? undefined
-          : offered
-            ? `未填写 ${GATEWAY_NAMES[via]} Key 或访问码`
-            : `未填写 ${GATEWAY_NAMES[via]} Key`,
-      ref: { source: "catalog", id: m.id, gateway: via, api_key: own ? key : "" },
+      badge: "",
+      ready: enabled && code,
+      problem: code ? undefined : "未填写访问码",
+      ref: { source: "catalog", id: m.id },
     });
   }
   if (builtin?.enabled)
     for (const m of builtin.models) {
       const enabled = s.builtin[m.id]?.enabled ?? true;
       if (!enabled && !includeDisabled) continue;
-      const code = s.accessCode.trim() !== "";
       out.push({
         key: `builtin:${m.id}`,
         name: m.name,
         source: "builtin",
-        badge: "内置",
+        badge: "",
         ready: enabled && code,
         problem: code ? undefined : "未填写访问码",
         ref: { source: "builtin", id: m.id },

@@ -1,17 +1,16 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, KeyRound, ListChecks, Plus, Server, Trash2 } from "lucide-react";
+import { ArrowRight, KeyRound, ListChecks, Plus, Trash2 } from "lucide-react";
 import { ErrorMessage, ExternalLink, PageHeader, Panel } from "../components/UI";
 import { checkAccess, listBuiltin, listModels, listPurposes } from "../vision/client";
 import {
   PRESETS,
   buildOptions,
-  catalogChoice,
+  catalogEnabled,
   hostOf,
   newCustom,
   useModelSettings,
   type BuiltinInfo,
   type CustomModel,
-  type Platform,
 } from "../vision/modelSettings";
 import {
   KIND_LABELS,
@@ -23,7 +22,7 @@ import {
   type CustomPurpose,
   type PurposeOption,
 } from "../vision/purposes";
-import { GATEWAY_NAMES, type Purpose, type VisionModel } from "../vision/types";
+import type { Purpose, VisionModel } from "../vision/types";
 
 const API_LABELS = {
   chat: "OpenAI Chat Completions",
@@ -35,10 +34,6 @@ const JSON_LABELS = {
   object: "JSON 模式（json_object）",
   prompt: "只在提示词里要求 JSON",
 } as const;
-const PLATFORM_KEY_URL: Record<Platform, string> = {
-  openrouter: "https://openrouter.ai/keys",
-  kie: "https://kie.ai/api-key",
-};
 
 function CustomForm({
   initial,
@@ -76,7 +71,7 @@ function CustomForm({
     <div className="model-form">
       <div className="parameter-grid">
         <div>
-          <label htmlFor="cm-preset">从平台预设开始</label>
+          <label htmlFor="cm-preset">从预设开始</label>
           <select
             id="cm-preset"
             value={m.preset}
@@ -480,7 +475,7 @@ export default function Models() {
       <PageHeader
         eyebrow="SETTINGS / MODELS"
         title="模型设置"
-        description="选择通过哪个平台调用模型，解锁服务器内置模型，接入你自己的模型接口，并设置图像理解的用途和提示词。设置只保存在本浏览器。"
+        description="填写访问码使用全部模型，选择要用哪些模型，接入你自己的模型接口，并设置图像理解的用途和提示词。设置只保存在本浏览器。"
         action={
           <a className="header-chip" href="#vision">
             <span className="live-dot" />
@@ -491,57 +486,11 @@ export default function Models() {
       />
       <ErrorMessage message={error} />
       <div className="models-page">
-        <Panel title="代理平台 Key" meta={<span className="panel-index">01</span>}>
-          <div className="parameter-grid">
-            {(Object.keys(GATEWAY_NAMES) as Platform[]).map((p) => (
-              <div key={p}>
-                <label htmlFor={`key-${p}`}>
-                  <KeyRound size={13} /> {GATEWAY_NAMES[p]} Key
-                </label>
-                <input
-                  id={`key-${p}`}
-                  aria-label={`${GATEWAY_NAMES[p]} Key`}
-                  type="password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={settings.keys[p]}
-                  onChange={(e) =>
-                    update((s) => ({ ...s, keys: { ...s.keys, [p]: e.target.value } }))
-                  }
-                />
-                {builtin?.platforms?.includes(p) && (
-                  <p className={`field-help ${settings.accessCode.trim() ? "ok" : ""}`}>
-                    服务器已提供 {GATEWAY_NAMES[p]} Key：填写下方的访问码即可直接使用；
-                    这里填了你自己的 Key 时优先用你的。
-                  </p>
-                )}
-                <p className="field-help">
-                  <ExternalLink href={PLATFORM_KEY_URL[p]}>获取 Key</ExternalLink>
-                </p>
-              </div>
-            ))}
-          </div>
-          <label className="vision-check">
-            <input
-              type="checkbox"
-              checked={settings.rememberKeys}
-              onChange={(e) =>
-                update((s) => ({ ...s, rememberKeys: e.target.checked }))
-              }
-            />
-            在本浏览器保存 Key（含访问码和自定义模型的 Key）
-          </label>
-          <p className="field-help">
-            Key 只保存在本浏览器的 localStorage，调用时随请求发给对应平台，服务器不保存、不记录。
-            不勾选时，关闭页面后需要重新填写。
-          </p>
-        </Panel>
-
         <Panel
-          title="内置模型"
+          title="访问码"
           meta={
             <span className="panel-index">
-              <Server size={12} /> 02
+              <KeyRound size={12} /> 01
             </span>
           }
         >
@@ -570,48 +519,35 @@ export default function Models() {
                   {access === "checking" ? "验证中…" : "验证"}
                 </button>
               </div>
-              {access === "ok" && <p className="field-help ok">访问码正确，可以使用内置模型。</p>}
+              {access === "ok" && <p className="field-help ok">访问码正确，可以使用全部模型。</p>}
               {access && access !== "ok" && access !== "checking" && (
                 <ErrorMessage message={access} />
               )}
               <p className="field-help">
-                内置模型{builtin.platforms?.length
-                  ? `和服务器的 ${builtin.platforms.map((p) => GATEWAY_NAMES[p]).join(" / ")} Key`
-                  : ""}
-                由服务器付费，用同一个访问码解锁，每个访问者每小时合计最多调用 {builtin.per_hour} 次。
+                一个访问码解锁下面的全部模型，每个访问者每小时最多调用 {builtin.per_hour} 次。
               </p>
-              <div className="model-toggle-list">
-                {builtin.models.map((m) => (
-                  <label key={m.id} className="vision-check">
-                    <input
-                      type="checkbox"
-                      checked={settings.builtin[m.id]?.enabled ?? true}
-                      onChange={(e) =>
-                        update((s) => ({
-                          ...s,
-                          builtin: { ...s.builtin, [m.id]: { enabled: e.target.checked } },
-                        }))
-                      }
-                    />
-                    <strong>{m.name}</strong>
-                    {m.notes && <small> · {m.notes}</small>}
-                  </label>
-                ))}
-              </div>
+              <label className="vision-check">
+                <input
+                  type="checkbox"
+                  checked={settings.rememberKeys}
+                  onChange={(e) =>
+                    update((s) => ({ ...s, rememberKeys: e.target.checked }))
+                  }
+                />
+                在本浏览器记住访问码（和自定义模型的 Key）
+              </label>
             </>
           ) : (
             <p className="field-help">
-              这台服务器没有开放内置模型。管理员在 API 环境变量中设置
-              <code>VISION_BUILTIN_MODELS</code> 和 <code>LAB_ACCESS_CODE</code>
-              后，这里会出现可用的模型。
+              服务器暂未开放模型。管理员在 API 环境变量中设置 <code>LAB_ACCESS_CODE</code>
+              和模型配置后，这里会出现访问码输入框。
             </p>
           )}
         </Panel>
 
-        <Panel title="模型目录" meta={<span className="panel-index">03</span>}>
+        <Panel title="模型" meta={<span className="panel-index">02</span>}>
           <p className="field-help">
-            实验预设的模型。勾选后出现在图像理解页和评判模型中；同一个模型可以选择经 OpenRouter
-            或 Kie.ai 调用（Kie.ai 只提供其中一部分）。
+            勾选的模型会出现在图像理解页和评判模型中。
           </p>
           <div className="vision-table-wrap">
             <table className="vision-table">
@@ -619,52 +555,62 @@ export default function Models() {
                 <tr>
                   <th>启用</th>
                   <th>模型</th>
-                  <th>调用平台</th>
+                  <th>说明</th>
                 </tr>
               </thead>
               <tbody>
-                {catalog.map((m) => {
-                  const choice = catalogChoice(settings, m);
-                  const served = m.gateways ?? ["openrouter"];
-                  const set = (patch: Partial<typeof choice>) =>
-                    update((s) => ({
-                      ...s,
-                      catalog: { ...s.catalog, [m.id]: { ...choice, ...patch } },
-                    }));
-                  return (
-                    <tr key={m.id}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          aria-label={`启用 ${m.name}`}
-                          checked={choice.enabled}
-                          onChange={(e) => set({ enabled: e.target.checked })}
-                        />
-                      </td>
-                      <td>
-                        <strong>{m.name}</strong>
-                        <small className="mono"> {m.id}</small>
-                      </td>
-                      <td>
-                        <select
-                          aria-label={`${m.name} 调用平台`}
-                          value={choice.via}
-                          disabled={served.length < 2}
-                          onChange={(e) => set({ via: e.target.value as Platform })}
-                        >
-                          {served.map((g) => (
-                            <option key={g} value={g}>
-                              {GATEWAY_NAMES[g]}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {catalog.map((m) => (
+                  <tr key={m.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`启用 ${m.name}`}
+                        checked={catalogEnabled(settings, m)}
+                        onChange={(e) =>
+                          update((s) => ({
+                            ...s,
+                            catalog: { ...s.catalog, [m.id]: { enabled: e.target.checked } },
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <strong>{m.name}</strong>
+                    </td>
+                    <td>
+                      <small>{m.notes}</small>
+                    </td>
+                  </tr>
+                ))}
+                {(builtin?.enabled ? builtin.models : []).map((m) => (
+                  <tr key={`b-${m.id}`}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`启用 ${m.name}`}
+                        checked={settings.builtin[m.id]?.enabled ?? true}
+                        onChange={(e) =>
+                          update((s) => ({
+                            ...s,
+                            builtin: { ...s.builtin, [m.id]: { enabled: e.target.checked } },
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <strong>{m.name}</strong>
+                    </td>
+                    <td>
+                      <small>{m.notes}</small>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
+          {!catalog.length && !builtin?.models.length && (
+            <p className="field-help">服务器暂未开放模型。</p>
+          )}
         </Panel>
 
         <Panel
@@ -681,8 +627,8 @@ export default function Models() {
         >
           {settings.custom.length === 0 && !editing && (
             <p className="field-help">
-              接入任意兼容的模型接口：DeepSeek、Kimi、Qwen、GLM 的官方 API，或 OpenRouter /
-              Kie.ai 上不在目录里的模型。选择平台预设会自动填好地址和格式。
+              用你自己的 Key 接入任意兼容的模型接口，例如 DeepSeek、Kimi、Qwen、GLM 的官方 API。
+              选择预设会自动填好地址和格式。
             </p>
           )}
           <div className="custom-model-list">

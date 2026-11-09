@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal
 
-from .openrouter import OpenRouterError
+from .calls import ModelError
 
 log = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class JobRunner:
                     job.status = 'done'
                 except asyncio.TimeoutError:
                     job.status, job.error, job.error_kind = 'failed', TIMEOUT_MESSAGE, 'timeout'
-                except OpenRouterError as err:
+                except ModelError as err:
                     job.status, job.error, job.error_kind = 'failed', err.message, err.kind
                 except Exception as err:  # noqa: BLE001 - isolate jobs from each other
                     log.error('vision job failed: %s', type(err).__name__)
