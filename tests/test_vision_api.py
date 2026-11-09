@@ -104,7 +104,7 @@ class VisionAPITests(unittest.TestCase):
     def test_models_and_samples(self):
         with TestClient(app) as client:
             models = client.get('/api/vision/models').json()
-            self.assertEqual(len(models), 9)
+            self.assertEqual(len(models), 8)
             self.assertEqual(set(models[0]), {'id', 'name', 'family', 'notes', 'params', 'price',
                                              'gateways'})
             self.assertEqual(set(models[0]['params']), {'max_tokens', 'temperature', 'reasoning'})

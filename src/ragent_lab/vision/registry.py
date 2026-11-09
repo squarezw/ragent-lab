@@ -49,8 +49,6 @@ VISION_MODELS: list[dict] = [
        temperature=None, notes=_SCHEMA + '；思考模型，不指定 temperature',
        kie=_kie('responses', '/openai/v1/responses', 'kimi-k3-1-pro')),
     _m('bytedance-seed/seed-2-1-turbo', 'Seed 2.1 Turbo', 'bytedance', 'json_schema', notes=_SCHEMA),
-    _m('deepseek/deepseek-v4-flash-vision-exp', 'DeepSeek V4 Flash Vision', 'deepseek',
-       'json_schema', notes=_SCHEMA),
     _m('minimax/minimax-m3', 'MiniMax M3', 'minimax', 'json_schema',
        reasoning={'enabled': False}, notes=_SCHEMA + '；关闭思考'),
 ]
