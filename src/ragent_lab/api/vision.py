@@ -118,11 +118,26 @@ class ExportBody(_Body):
 GATEWAY_NAMES = {'openrouter': 'OpenRouter', 'kie': 'Kie.ai'}
 
 
-def _key(body: _Keyed) -> str:
-    key = body.api_key.get_secret_value().strip()
-    if not key:
-        raise HTTPException(422, f'请填写 {GATEWAY_NAMES[body.gateway]} Key')
-    return key
+def _use_server_key(gateway: str, body: _Keyed, request: Request) -> str:
+    """The server's own platform key, for visitors with the access code (rate-limited)."""
+    name = GATEWAY_NAMES[gateway]
+    if gateway not in builtins.platforms():
+        raise HTTPException(422, f'请填写 {name} Key')
+    code = body.access_code.get_secret_value().strip()
+    if not code:
+        raise HTTPException(422, f'请填写 {name} Key，或在「模型设置」填写访问码使用服务器的 Key')
+    ip = _client_ip(request)
+    if not builtins.check_code(code, ip):
+        raise HTTPException(403, '访问码不正确，无法使用服务器的 Key')
+    if not builtins.take(ip):
+        raise HTTPException(429, f'服务器 Key 每小时最多调用 {builtins.per_hour} 次，请稍后再试')
+    return builtins.platform_keys[gateway]
+
+
+def _platform_key(given: SecretStr, gateway: str, body: _Keyed, request: Request) -> str:
+    """The visitor's own key if they gave one, else the server's (needs the access code)."""
+    key = given.get_secret_value().strip()
+    return key or _use_server_key(gateway, body, request)
 
 
 def _resolve_image(ref: ImageRef) -> PreparedImage:
@@ -160,7 +175,7 @@ def _client_ip(request: Request) -> str:
     return request.headers.get('x-real-ip') or (request.client.host if request.client else '-')
 
 
-def _ref_key(ref, gateway: str) -> str:
+def _ref_key(ref, gateway: str) -> str:  # custom endpoints: always the visitor's key
     key = ref.api_key.get_secret_value().strip()
     if not key:
         raise HTTPException(422, f'请填写 {gateway} Key')
@@ -175,14 +190,14 @@ async def _resolve(ref, body: _Keyed, request: Request, judge: bool = False):
         else:
             _check_model(ref, body.gateway)
             model = get_model(ref)
-        return model, body.gateway, _key(body)
+        return model, body.gateway, _platform_key(body.api_key, body.gateway, body, request)
     if isinstance(ref, CatalogRef):
         if judge:
             model = _judge(ref.id, ref.gateway)
         else:
             _check_model(ref.id, ref.gateway)
             model = get_model(ref.id)
-        return model, ref.gateway, _ref_key(ref, GATEWAY_NAMES[ref.gateway])
+        return model, ref.gateway, _platform_key(ref.api_key, ref.gateway, body, request)
     if isinstance(ref, BuiltinRef):
         model = builtins.models.get(ref.id) if builtins.enabled else None
         if model is None:
@@ -244,7 +259,7 @@ def judge():
 def builtin_models():
     """Built-in models (names only) and whether they are offered at all."""
     return {'enabled': builtins.enabled, 'per_hour': builtins.per_hour,
-            'models': builtins.public_list()}
+            'models': builtins.public_list(), 'platforms': builtins.platforms()}
 
 
 class AccessBody(_Body):

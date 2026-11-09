@@ -115,6 +115,16 @@ class BuiltinTests(unittest.TestCase):
         self.assertFalse(b.take('1.1.1.1'))
         self.assertTrue(b.take('9.9.9.9'))
 
+    def test_platform_keys_need_access_code(self):
+        b = self.make(OPENROUTER_API_KEY=' sk-or ', KIE_API_KEY='')
+        self.assertEqual(b.platforms(), ['openrouter'])
+        self.assertEqual(b.platform_keys, {'openrouter': 'sk-or'})
+        self.assertEqual(self.make(OPENROUTER_API_KEY='sk-or', LAB_ACCESS_CODE=None).platforms(), [])
+        # Platform keys alone (no built-in models) still enable the access code.
+        only = Builtins({'OPENROUTER_API_KEY': 'sk-or', 'LAB_ACCESS_CODE': 'x'})
+        self.assertTrue(only.enabled)
+        self.assertEqual(only.public_list(), [])
+
     def test_bad_json(self):
         with self.assertLogs('ragent_lab.vision.builtin', level='WARNING'):
             self.assertEqual(Builtins({'VISION_BUILTIN_MODELS': '{oops'}).models, {})

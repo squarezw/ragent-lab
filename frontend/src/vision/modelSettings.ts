@@ -39,7 +39,16 @@ export type BuiltinInfo = {
   enabled: boolean;
   per_hour: number;
   models: { id: string; name: string; notes: string }[];
+  // Platforms the server has its own key for, usable with the access code.
+  platforms?: Platform[];
 };
+
+// The server's key for this platform can be used (it has one and the visitor gave the code).
+export const serverKeyFor = (
+  s: ModelSettings,
+  builtin: BuiltinInfo | null,
+  p: Platform,
+) => !!builtin?.platforms?.includes(p) && s.accessCode.trim() !== "";
 
 // What the server needs to call a model. Keys travel only in request bodies.
 export type ModelRef =
@@ -332,14 +341,23 @@ export function buildOptions(
     const { enabled, via } = catalogChoice(s, m);
     if (!enabled && !includeDisabled) continue;
     const key = s.keys[via];
+    const own = key.trim() !== "";
+    // Without a key of their own, the request goes out with the access code instead.
+    const server = !own && serverKeyFor(s, builtin, via);
+    const offered = !!builtin?.platforms?.includes(via);
     out.push({
       key: `catalog:${m.id}`,
       name: m.name,
       source: "catalog",
-      badge: GATEWAY_NAMES[via],
-      ready: enabled && key.trim() !== "",
-      problem: key.trim() ? undefined : `未填写 ${GATEWAY_NAMES[via]} Key`,
-      ref: { source: "catalog", id: m.id, gateway: via, api_key: key },
+      badge: server ? `${GATEWAY_NAMES[via]} · 服务器 Key` : GATEWAY_NAMES[via],
+      ready: enabled && (own || server),
+      problem:
+        own || server
+          ? undefined
+          : offered
+            ? `未填写 ${GATEWAY_NAMES[via]} Key 或访问码`
+            : `未填写 ${GATEWAY_NAMES[via]} Key`,
+      ref: { source: "catalog", id: m.id, gateway: via, api_key: own ? key : "" },
     });
   }
   if (builtin?.enabled)
