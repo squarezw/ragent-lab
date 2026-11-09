@@ -23,7 +23,23 @@ export type VisionModel = {
   priceLabel?: string;
 };
 
-export type Sample = { id: string; name: string; scorable: boolean };
+// Which output structure an understanding uses (see vision/prompts.py PURPOSES).
+export type PurposeKind = "engineering" | "general";
+
+export type Sample = {
+  id: string;
+  name: string;
+  scorable: boolean;
+  kind?: PurposeKind;
+};
+
+export type Purpose = {
+  id: string;
+  name: string;
+  kind: PurposeKind;
+  description: string;
+  prompt: string;
+};
 
 export type ImageRef = { kind: "sample" | "upload"; id: string };
 
@@ -89,6 +105,36 @@ export type Understanding = {
   unresolved: string[];
 };
 
+export type GeneralUnderstanding = {
+  title: string;
+  image_type: string;
+  summary: string;
+  elements: {
+    id: string;
+    type: string;
+    label: string;
+    description: string;
+    confidence: number;
+    uncertainty: string;
+  }[];
+  texts: string[];
+  data: {
+    name: string;
+    value: string;
+    unit: string;
+    source: string;
+    confidence: number;
+    uncertainty: string;
+  }[];
+  relations: string[];
+  unresolved: string[];
+};
+
+export type AnyUnderstanding = Understanding | GeneralUnderstanding;
+
+export const isEngineering = (u: AnyUnderstanding): u is Understanding =>
+  "dimensions" in u;
+
 type EntityBase = { layer: Layer; dimension_ref: string | null };
 export type Entity =
   | (EntityBase & { type: "line"; start: number[]; end: number[] })
@@ -150,7 +196,9 @@ export type RunMeta = {
 export type UnderstandResult = {
   model: string;
   model_name: string;
-  understanding: Understanding;
+  purpose?: string;
+  kind?: PurposeKind;
+  understanding: AnyUnderstanding;
   meta: RunMeta;
 };
 

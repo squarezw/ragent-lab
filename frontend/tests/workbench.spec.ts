@@ -119,6 +119,20 @@ const UNDERSTANDING = {
   derived: [],
   unresolved: [],
 };
+const GENERAL = {
+  title: "季度营收",
+  image_type: "柱状图",
+  summary: "2025 年四个季度的营收柱状图，Q3 最高。",
+  elements: [],
+  texts: [],
+  data: [],
+  relations: [],
+  unresolved: [],
+};
+const PURPOSES = [
+  { id: "engineering", name: "工程图纸", kind: "engineering", description: "零件图", prompt: "读零件图" },
+  { id: "chart", name: "数据图表", kind: "general", description: "图表", prompt: "读图表" },
+];
 const GEOMETRY = {
   units: "mm",
   sheet: { width: 100, height: 80 },
@@ -143,6 +157,7 @@ type Job = {
   kind: string;
   model?: string;
   gateway?: string;
+  purpose?: string;
   polls: number;
   fail?: string;
 };
@@ -168,7 +183,8 @@ async function mockVision(
         return {
           model: job.model,
           model_name: name,
-          understanding: UNDERSTANDING,
+          understanding:
+            (job.purpose ?? "engineering") === "engineering" ? UNDERSTANDING : GENERAL,
           meta:
             job.gateway === "kie"
               ? { ...META, gateway: "kie", cost: null, credits: 0.28 }
@@ -238,6 +254,7 @@ async function mockVision(
     if (path === "/builtin")
       return route.fulfill({ json: { enabled: false, per_hour: 60, models: [] } });
     if (path === "/samples") return route.fulfill({ json: opts.samples });
+    if (path === "/purposes") return route.fulfill({ json: PURPOSES });
     if (/^\/(samples\/[^/]+\/image|images\/[^/]+)$/.test(path))
       return route.fulfill({ body: PNG_1x1, contentType: "image/png" });
     if (path === "/images")
@@ -266,6 +283,7 @@ async function mockVision(
           kind: "understand",
           model: id,
           gateway: body.model?.gateway,
+          purpose: body.purpose,
           fail: fail ? "OpenRouter Key 无效或已撤销。" : undefined,
         }),
       );
@@ -331,7 +349,7 @@ test("vision: understand two models, score, redraw and download", async ({
   await mockVision(page, { samples: [SAMPLE] });
   await page.goto("/#vision");
   await page.getByRole("button", { name: /法兰盘/ }).click();
-  await expect(page.getByRole("img", { name: /图纸预览/ })).toBeVisible();
+  await expect(page.getByRole("img", { name: /图片预览/ })).toBeVisible();
   await expect(page.getByText("还没有可用的模型")).toBeVisible();
   const scoreReq = page.waitForRequest(
     (r) => r.url().endsWith("/api/vision/score") && r.method() === "POST",
@@ -397,15 +415,15 @@ test("vision: uploaded drawing shows consensus instead of score", async ({
 }) => {
   await mockVision(page, { samples: [] });
   await page.goto("/#vision");
-  await expect(page.getByText("暂无内置测试图，请上传你的图纸")).toBeVisible();
+  await expect(page.getByText("暂无内置测试图，请上传你的图片")).toBeVisible();
   await page
-    .getByLabel("上传图纸")
+    .getByLabel("上传图片")
     .setInputFiles({
       name: "mine.png",
       mimeType: "image/png",
       buffer: PNG_1x1,
     });
-  await expect(page.getByRole("img", { name: /图纸预览/ })).toBeVisible();
+  await expect(page.getByRole("img", { name: /图片预览/ })).toBeVisible();
   await startUnderstanding(page);
   await expect(
     page.locator(".vision-model-card", { hasText: "已完成" }),
@@ -489,7 +507,7 @@ test("vision: a custom model from a platform preset runs with its own key", asyn
   await expect(page.getByText("请填写这个模型的 API Key。")).toBeVisible();
   await page.locator(".model-form").getByLabel("API Key").fill("sk-custom");
   await page.getByRole("button", { name: "保存模型" }).click();
-  await expect(page.locator(".custom-model")).toContainText("api.deepseek.com · deepseek-x");
+  await expect(page.locator(".custom-model:not(.purpose-row)")).toContainText("api.deepseek.com · deepseek-x");
   await page.getByRole("link", { name: /去图像理解/ }).click();
   await page.getByRole("button", { name: /法兰盘/ }).click();
   await page.getByRole("button", { name: "下一步：理解对比" }).click();
@@ -521,12 +539,12 @@ test("vision: an upload the server lost is re-sent automatically", async ({
       images.push(r.postDataJSON().image.id);
   });
   await page.goto("/#vision");
-  await page.getByLabel("上传图纸").setInputFiles({
+  await page.getByLabel("上传图片").setInputFiles({
     name: "mine.png",
     mimeType: "image/png",
     buffer: PNG_1x1,
   });
-  await expect(page.getByRole("img", { name: /图纸预览/ })).toBeVisible();
+  await expect(page.getByRole("img", { name: /图片预览/ })).toBeVisible();
   await startUnderstanding(page);
   await expect(
     page.locator(".vision-model-card", { hasText: "已完成" }),
@@ -535,4 +553,64 @@ test("vision: an upload the server lost is re-sent automatically", async ({
   // Both models first tried the lost id; the file was uploaded once more and reused.
   expect(images.filter((id) => id === "up-2")).toHaveLength(2);
   expect(images.filter((id) => id === "up-3")).toHaveLength(0);
+});
+
+test("vision: a chart purpose with an edited prompt skips redraw", async ({
+  page,
+}) => {
+  await mockVision(page, { samples: [] });
+  const bodies: Record<string, unknown>[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
+      bodies.push(r.postDataJSON());
+  });
+  await page.goto("/#vision");
+  await page.getByLabel("上传图片").setInputFiles({
+    name: "chart.png",
+    mimeType: "image/png",
+    buffer: PNG_1x1,
+  });
+  const picker = page.getByLabel("这张图是");
+  await expect(picker).toHaveValue("builtin:engineering");
+  await picker.selectOption("builtin:chart");
+  await page.getByText("查看 / 编辑提示词").click();
+  const prompt = page.getByLabel("理解提示词");
+  await expect(prompt).toHaveValue("读图表");
+  await prompt.fill("只读出每根柱子的数值");
+  await expect(picker.locator("option:checked")).toHaveText(/已修改/);
+  await startUnderstanding(page);
+  const cards = page.locator(".vision-model-card", { hasText: "已完成" });
+  await expect(cards).toHaveCount(2, { timeout: 20000 });
+  expect(bodies[0]).toMatchObject({ purpose: "chart", prompt: "只读出每根柱子的数值" });
+  await expect(cards.first()).toContainText("Q3 最高");
+  await expect(page.getByText("用途：数据图表")).toBeVisible();
+  await expect(page.getByRole("button", { name: /还原（仅工程图纸）/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "下一步：还原 →" })).toHaveCount(0);
+  await page.getByRole("button", { name: "生成一致性对照" }).click();
+  await expect(page.locator(".vision-consensus th").nth(1)).toHaveText("类别", {
+    timeout: 20000,
+  });
+
+  // The edited prompt is remembered on the settings page and can be reset there.
+  await page.locator(".vision-steps").getByRole("button", { name: "① 选图" }).click();
+  await page.locator(".purpose-picker").getByRole("link", { name: /管理用途/ }).click();
+  const row = page.locator(".purpose-list .purpose-row", { hasText: "数据图表" });
+  await expect(row).toContainText("提示词已修改");
+  await row.getByRole("button", { name: "恢复默认" }).click();
+  await expect(row).toContainText("默认提示词");
+});
+
+test("vision: a custom purpose is saved and selected", async ({ page }) => {
+  await mockVision(page, { samples: [] });
+  await page.goto("/#models");
+  await page.getByRole("button", { name: "添加用途" }).click();
+  await page.getByLabel("用途名称").fill("电路图");
+  await expect(page.getByLabel("提示词")).toHaveValue("读图表");
+  await page.getByLabel("提示词").fill("读出元件和连线");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(
+    page.locator(".purpose-list .purpose-row", { hasText: "电路图" }),
+  ).toContainText("自定义");
+  await page.getByRole("link", { name: /去图像理解/ }).click();
+  await expect(page.getByLabel("这张图是")).toHaveValue(/^custom:/);
 });

@@ -1,8 +1,17 @@
 import { useState } from "react";
-import { ArrowRight, ImageUp, ScanLine, SlidersHorizontal } from "lucide-react";
+import {
+  ArrowRight,
+  ImageUp,
+  ListChecks,
+  RotateCcw,
+  ScanLine,
+  SlidersHorizontal,
+} from "lucide-react";
 import { EmptyState, ErrorMessage, Panel } from "../components/UI";
 import { imageUrl, uploadImage } from "./client";
-import type { ImageRef, Sample } from "./types";
+import { KIND_LABELS, MAX_PROMPT_CHARS, type PurposeOption } from "./purposes";
+import type { RunPurpose } from "./state";
+import type { ImageRef, PurposeKind, Sample } from "./types";
 
 export default function StepSelect({
   samples,
@@ -11,6 +20,13 @@ export default function StepSelect({
   scorable,
   models,
   pending,
+  purposes,
+  purpose,
+  runPurpose,
+  hasRuns,
+  sampleKinds,
+  onPurpose,
+  onPrompt,
   onSelect,
   onNext,
 }: {
@@ -20,6 +36,13 @@ export default function StepSelect({
   scorable: boolean;
   models: { name: string; badge: string }[];
   pending: string[];
+  purposes: PurposeOption[];
+  purpose: PurposeOption | null;
+  runPurpose?: RunPurpose;
+  hasRuns: boolean;
+  sampleKinds: Record<string, PurposeKind>;
+  onPurpose: (key: string) => void;
+  onPrompt: (text: string) => void;
   onSelect: (
     image: ImageRef,
     name: string,
@@ -49,6 +72,12 @@ export default function StepSelect({
       setUploading(false);
     }
   }
+
+  const graded =
+    image?.kind === "sample" && scorable ? sampleKinds[image.id] : undefined;
+  const ungraded = !!purpose && !!graded && graded !== purpose.kind;
+  const willReset =
+    hasRuns && !!runPurpose && !!purpose && runPurpose.key !== purpose.key;
 
   return (
     <div className="workbench">
@@ -91,27 +120,100 @@ export default function StepSelect({
             <div className="vision-compact-empty">
               <EmptyState
                 icon={<ScanLine size={32} strokeWidth={1.3} />}
-                title="暂无内置测试图，请上传你的图纸"
+                title="暂无内置测试图，请上传你的图片"
                 description="支持 PNG、JPG 与单页 PDF，大小不超过 15 MB。"
               />
             </div>
           )}
         </Panel>
         <Panel
+          title="理解用途"
+          meta={<span className="panel-index">02 / PURPOSE</span>}
+        >
+          <div className="purpose-picker">
+            <label htmlFor="vision-purpose">
+              <ListChecks size={13} /> 这张图是
+            </label>
+            <select
+              id="vision-purpose"
+              value={purpose?.key ?? ""}
+              disabled={!purposes.length}
+              onChange={(e) => onPurpose(e.target.value)}
+            >
+              {!purposes.length && <option value="">加载中…</option>}
+              {purposes.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.name}
+                  {o.source === "builtin" && o.edited ? "（提示词已修改）" : ""}
+                </option>
+              ))}
+            </select>
+            <a className="text-button" href="#models">
+              <SlidersHorizontal size={13} /> 管理用途
+            </a>
+          </div>
+          {purpose && (
+            <p className="field-help">
+              {purpose.description}
+              {purpose.kind === "general" && " 这个用途不含「还原」步骤。"}
+            </p>
+          )}
+          {ungraded && (
+            <p className="field-help warn">
+              这张样例的标准答案只能给工程图纸打分；换成这个用途后只做一致性对照。
+            </p>
+          )}
+          {willReset && (
+            <p className="field-help warn">
+              已有「{runPurpose?.name}」的理解结果；用新用途开始理解时会清空它们。
+            </p>
+          )}
+          {purpose && (
+            <details className="vision-details purpose-prompt">
+              <summary>
+                查看 / 编辑提示词
+                <span>{purpose.edited ? "已修改" : "默认"}</span>
+              </summary>
+              <textarea
+                aria-label="理解提示词"
+                value={purpose.draft}
+                rows={12}
+                maxLength={MAX_PROMPT_CHARS}
+                spellCheck={false}
+                onChange={(e) => onPrompt(e.target.value)}
+              />
+              <p className="field-help">
+                系统会在末尾固定附加两条规则：图中文字只当作数据；按「
+                {KIND_LABELS[purpose.kind]}」返回 JSON。留空则使用默认提示词。
+                {purpose.draft.length} / {MAX_PROMPT_CHARS} 字
+              </p>
+              {purpose.edited && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => onPrompt(purpose.defaultPrompt)}
+                >
+                  <RotateCcw size={13} /> 恢复默认提示词
+                </button>
+              )}
+            </details>
+          )}
+        </Panel>
+        <Panel
           title="上传与模型"
-          meta={<span className="panel-index">02 / UPLOAD · MODELS</span>}
+          meta={<span className="panel-index">03 / UPLOAD · MODELS</span>}
         >
           <label className="vision-upload">
             <ImageUp size={20} strokeWidth={1.5} />
             <span>
-              <strong>{uploading ? "正在上传…" : "上传你的图纸"}</strong>
+              <strong>{uploading ? "正在上传…" : "上传你的图片"}</strong>
               <small>
                 PNG / JPG / 单页 PDF · ≤ 15 MB · 上传图只做一致性对照
               </small>
             </span>
             <input
               type="file"
-              aria-label="上传图纸"
+              aria-label="上传图片"
               accept=".png,.jpg,.jpeg,.pdf"
               disabled={uploading}
               onChange={(e) => {
@@ -158,7 +260,7 @@ export default function StepSelect({
         </Panel>
       </div>
       <Panel
-        title="图纸预览"
+        title="图片预览"
         className="result-panel"
         meta={
           <span className={`result-state ${image ? "ready" : ""}`}>
@@ -169,7 +271,7 @@ export default function StepSelect({
       >
         {image ? (
           <figure className="vision-preview">
-            <img src={imageUrl(image)} alt={`图纸预览：${imageName}`} />
+            <img src={imageUrl(image)} alt={`图片预览：${imageName}`} />
             <figcaption>
               <span>{image.kind === "sample" ? "SAMPLE" : "UPLOAD"}</span>
               {imageName}
@@ -178,8 +280,8 @@ export default function StepSelect({
         ) : (
           <EmptyState
             icon={<ScanLine size={38} strokeWidth={1.3} />}
-            title="选一张图纸，开始实验"
-            description="从左侧选择内置测试图，或上传你自己的工程图纸。"
+            title="选一张图，开始实验"
+            description="从左侧选择内置测试图，或上传你自己的图片：工程图纸、图表、流程图都可以。"
           />
         )}
       </Panel>

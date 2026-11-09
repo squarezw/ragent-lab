@@ -82,6 +82,37 @@ class Understanding(_Base):
     unresolved: list[str] = []
 
 
+# ---- General understanding (charts, diagrams, any image) -----------------
+
+class Element(_Base):
+    id: str
+    type: str = ''
+    label: str = ''
+    description: str = ''
+    confidence: float = 1.0
+    uncertainty: str = ''
+
+
+class DataPoint(_Base):
+    name: str
+    value: str = ''
+    unit: str = ''
+    source: str = ''
+    confidence: float = 1.0
+    uncertainty: str = ''
+
+
+class GeneralUnderstanding(_Base):
+    title: str = ''
+    image_type: str = ''
+    summary: str
+    elements: list[Element] = []
+    texts: list[str] = []
+    data: list[DataPoint] = []
+    relations: list[str] = []
+    unresolved: list[str] = []
+
+
 # ---- Geometry ------------------------------------------------------------
 
 MAX_POLY_POINTS = 2000
@@ -224,6 +255,8 @@ class Rubric(BaseModel):
     id: str
     name: str
     image: str
+    # Which output structure the rubric grades: 'engineering' or 'general'.
+    kind: Literal['engineering', 'general'] = 'engineering'
     rubric_status: Literal['approved', 'draft']
     items: list[RubricItem]
 

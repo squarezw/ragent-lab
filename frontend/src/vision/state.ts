@@ -1,5 +1,7 @@
+import type { PurposeRequest } from "./purposes";
 import type {
-  ConsensusResult, DimWarning, Gateway, Geometry, ImageRef, RunMeta, ScoreResult, Understanding,
+  AnyUnderstanding, ConsensusResult, DimWarning, Gateway, Geometry, ImageRef, PurposeKind,
+  RunMeta, ScoreResult,
 } from "./types";
 
 export type RunStatus = "idle" | "queued" | "running" | "done" | "failed";
@@ -8,7 +10,7 @@ export type RunEntry = {
   model: string;
   model_name: string;
   status: RunStatus;
-  understanding?: Understanding;
+  understanding?: AnyUnderstanding;
   meta?: RunMeta;
   error?: string;
   score?: ScoreResult;
@@ -35,8 +37,24 @@ export type ConsensusEntry = {
   error?: string;
 };
 
+// The purpose (and exact prompt) that produced the runs on screen; retries reuse it.
+export type RunPurpose = {
+  key: string;
+  name: string;
+  kind: PurposeKind;
+  request: PurposeRequest;
+};
+
+export const samePurpose = (a?: RunPurpose, b?: RunPurpose) =>
+  !!a &&
+  !!b &&
+  a.key === b.key &&
+  a.request.purpose === b.request.purpose &&
+  (a.request.prompt ?? "") === (b.request.prompt ?? "");
+
 export type VisionState = {
   step: 1 | 2 | 3;
+  purpose?: RunPurpose;
   image: ImageRef | null;
   imageName: string;
   scorable: boolean;
@@ -57,6 +75,7 @@ export const initialState: VisionState = {
 export type Action =
   | { type: "selectImage"; image: ImageRef; imageName: string; scorable: boolean }
   | { type: "imageReplaced"; image: ImageRef }
+  | { type: "setPurpose"; purpose: RunPurpose }
   | { type: "setStep"; step: 1 | 2 | 3 }
   | { type: "runUpdate"; model: string; patch: Partial<RunEntry> }
   | { type: "scoreUpdate"; model: string; patch: Partial<RunEntry> }
@@ -80,6 +99,16 @@ export function reducer(state: VisionState, action: Action): VisionState {
       };
     case "imageReplaced":
       return { ...state, image: action.image };
+    case "setPurpose":
+      // Results from another purpose (or prompt) cannot be compared with new ones.
+      if (samePurpose(state.purpose, action.purpose)) return state;
+      return {
+        ...state,
+        purpose: action.purpose,
+        runs: {},
+        consensus: undefined,
+        generations: [],
+      };
     case "setStep":
       return { ...state, step: action.step };
     case "runUpdate": {
@@ -155,8 +184,19 @@ export function importState(text: string): VisionState {
   const generations = (data.generations as GenerationEntry[]).map((g) =>
     pending(g.status) ? { ...g, status: "failed" as const, error: INTERRUPTED } : g,
   );
+  const p = data.purpose;
+  const purpose =
+    isObj(p) &&
+    typeof p.key === "string" &&
+    typeof p.name === "string" &&
+    (p.kind === "engineering" || p.kind === "general") &&
+    isObj(p.request) &&
+    typeof p.request.purpose === "string"
+      ? (p as RunPurpose)
+      : undefined;
   return {
     step: 2,
+    purpose,
     image: image as ImageRef | null,
     imageName: data.imageName,
     scorable: data.scorable,

@@ -3,6 +3,7 @@ import { ErrorMessage, PageHeader } from "../components/UI";
 import {
   listBuiltin,
   listModels,
+  listPurposes,
   listSamples,
   pollJob,
   submit,
@@ -16,21 +17,33 @@ import {
   initialState,
   judgeStorage,
   reducer,
+  type RunPurpose,
 } from "../vision/state";
+import {
+  purposeOptions,
+  purposeRequest,
+  selectedPurpose,
+  usePurposeSettings,
+  withPrompt,
+  type PurposeOption,
+} from "../vision/purposes";
 import {
   buildOptions,
   useModelSettings,
   type BuiltinInfo,
 } from "../vision/modelSettings";
-import type {
-  ConsensusResult,
-  GenerateResult,
-  ImageRef,
-  Sample,
-  ScoreResult,
-  UnderstandResult,
-  Understanding,
-  VisionModel,
+import {
+  isEngineering,
+  type AnyUnderstanding,
+  type ConsensusResult,
+  type GenerateResult,
+  type ImageRef,
+  type Purpose,
+  type PurposeKind,
+  type Sample,
+  type ScoreResult,
+  type UnderstandResult,
+  type VisionModel,
 } from "../vision/types";
 import StepSelect from "../vision/StepSelect";
 import StepUnderstand from "../vision/StepUnderstand";
@@ -38,6 +51,13 @@ import StepRedraw from "../vision/StepRedraw";
 
 const NO_MODELS = "还没有可用的模型：请先到「模型设置」填写 Key、访问码，或添加模型。";
 const NOT_CONFIGURED = "这个模型已不在「模型设置」中启用，请先启用或改选其他模型。";
+const NO_PURPOSE = "理解用途还没加载出来，请刷新页面后重试。";
+const toRun = (o: PurposeOption): RunPurpose => ({
+  key: o.key,
+  name: o.name,
+  kind: o.kind,
+  request: purposeRequest(o),
+});
 const isAbort = (e: unknown) => (e as Error)?.name === "AbortError";
 const isImageGone = (e: unknown) =>
   ((e as Error)?.message ?? "").includes("图片已过期");
@@ -62,6 +82,8 @@ export default function Vision() {
   const [deselected, setDeselected] = useState<string[]>([]);
   const [settings] = useModelSettings();
   const [builtin, setBuiltin] = useState<BuiltinInfo | null>(null);
+  const [purposes, setPurposes] = useState<Purpose[]>([]);
+  const [purposeSettings, updatePurposes] = usePurposeSettings();
   const [judgePick, setJudgePick] = useState(() => judgeStorage.load());
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -88,6 +110,9 @@ export default function Vision() {
       .catch(() => setBuiltin(null));
     listSamples()
       .then(setSamples)
+      .catch((e) => setError(e.message));
+    listPurposes()
+      .then(setPurposes)
       .catch((e) => setError(e.message));
   }, []);
 
@@ -128,6 +153,15 @@ export default function Vision() {
     setJudgePick(model);
     judgeStorage.save(model);
   }
+  const purpose = selectedPurpose(purposeSettings, purposes);
+  // The structure of the results on screen (or of the next run when there are none).
+  const kind: PurposeKind = state.purpose?.kind ?? purpose?.kind ?? "engineering";
+  // A sample's rubric grades one structure; other purposes only get the consensus check.
+  const scorableFor = (k: PurposeKind) =>
+    state.scorable &&
+    state.image?.kind === "sample" &&
+    (samples.find((s) => s.id === state.image?.id)?.kind ?? "engineering") === k;
+
   function requireModels(): boolean {
     if (usable.length) return true;
     setActionError(NO_MODELS);
@@ -170,7 +204,7 @@ export default function Vision() {
 
   async function score(
     model: string,
-    understanding: Understanding,
+    understanding: AnyUnderstanding,
     image: ImageRef,
   ) {
     const signal = ctrl.current.signal;
@@ -201,10 +235,10 @@ export default function Vision() {
     }
   }
 
-  async function understand(model: string) {
+  async function understand(model: string, run: RunPurpose) {
     const image = state.image;
     if (!image) return;
-    const scorable = state.scorable && image.kind === "sample";
+    const scorable = scorableFor(run.kind);
     const signal = ctrl.current.signal;
     const name =
       options.find((o) => o.key === model)?.name ??
@@ -228,7 +262,7 @@ export default function Vision() {
       const result = await withImage(image, (img) =>
         runJob<UnderstandResult>(
           "understand",
-          { image: img, model: refFor(model), ...access },
+          { image: img, model: refFor(model), ...run.request, ...access },
           signal,
         ),
       );
@@ -259,12 +293,17 @@ export default function Vision() {
     if (!requireModels()) return;
     const runnable = selected;
     if (!runnable.length) return setActionError("请至少选择一个模型。");
+    if (!purpose) return setActionError(NO_PURPOSE);
+    const run = toRun(purpose);
+    dispatch({ type: "setPurpose", purpose: run });
     dispatch({ type: "consensusUpdate", consensus: undefined });
-    runnable.forEach((m) => void understand(m));
+    runnable.forEach((m) => void understand(m, run));
   }
 
   function retry(model: string) {
-    if (requireModels()) void understand(model);
+    const run = state.purpose ?? (purpose && toRun(purpose));
+    if (!run) return setActionError(NO_PURPOSE);
+    if (requireModels()) void understand(model, run);
   }
   function retryScore(model: string) {
     const u = state.runs[model]?.understanding;
@@ -305,7 +344,8 @@ export default function Vision() {
     setActionError("");
     const understanding = state.runs[sourceModel]?.understanding;
     const image = state.image;
-    if (!understanding || !image || !requireModels()) return;
+    if (!understanding || !isEngineering(understanding) || !image || !requireModels())
+      return;
     const signal = ctrl.current.signal;
     const id = `gen-${Date.now()}-${++generationSeq}`;
     dispatch({
@@ -368,7 +408,11 @@ export default function Vision() {
   const steps = [
     { step: 1 as const, label: "① 选图", enabled: true },
     { step: 2 as const, label: "② 理解对比", enabled: !!state.image },
-    { step: 3 as const, label: "③ 还原", enabled: hasDone },
+    {
+      step: 3 as const,
+      label: kind === "engineering" ? "③ 还原" : "③ 还原（仅工程图纸）",
+      enabled: hasDone && kind === "engineering",
+    },
   ];
   const go = (step: 1 | 2 | 3) => {
     setActionError("");
@@ -380,7 +424,7 @@ export default function Vision() {
       <PageHeader
         eyebrow="EXPERIMENT 03 / VISION UNDERSTANDING"
         title="从看见，到真正理解。"
-        description="同一张工程图纸，交给多个视觉模型理解并打分，再把理解 1:1 还原为可编辑的 DXF。"
+        description="同一张图，按你选的用途交给多个视觉模型理解，对比打分或做一致性对照；工程图纸还能 1:1 还原为可编辑的 DXF。"
         action={
           <a className="header-chip" href="#models">
             <span className="live-dot" />
@@ -411,6 +455,17 @@ export default function Vision() {
           scorable={state.scorable}
           models={usable.map((o) => ({ name: o.name, badge: o.badge }))}
           pending={pending.map((o) => `${o.name}：${o.problem ?? "未就绪"}`)}
+          purposes={purposeOptions(purposeSettings, purposes)}
+          purpose={purpose}
+          runPurpose={state.purpose}
+          hasRuns={Object.keys(state.runs).length > 0}
+          sampleKinds={Object.fromEntries(
+            samples.map((s) => [s.id, s.kind ?? "engineering"]),
+          )}
+          onPurpose={(key) => updatePurposes((s) => ({ ...s, selected: key }))}
+          onPrompt={(text) =>
+            purpose && updatePurposes((s) => withPrompt(s, purpose, text))
+          }
           onSelect={(image, imageName, scorable, file) => {
             uploadFile.current = image.kind === "upload" ? file : undefined;
             resetJobs();
@@ -424,7 +479,9 @@ export default function Vision() {
           models={available}
           selected={selected}
           runs={state.runs}
-          scorable={state.scorable && state.image?.kind === "sample"}
+          scorable={scorableFor(kind)}
+          kind={kind}
+          purposeName={state.purpose?.name ?? purpose?.name ?? ""}
           consensus={state.consensus}
           judge={judge}
           onJudge={changeJudge}
@@ -459,7 +516,7 @@ export default function Vision() {
       )}
       <div className="bottom-tip">
         <span>实验手记</span>
-        模型理解、打分与还原按「模型设置」调用对应平台，Key 只随请求发送、服务器不保存；任务结果只在服务器内存中保留 2 小时，上传的图纸在服务器上保留 7 天后自动删除。
+        模型理解、打分与还原按「模型设置」调用对应平台，Key 只随请求发送、服务器不保存；任务结果只在服务器内存中保留 2 小时，上传的图片在服务器上保留 7 天后自动删除；用途和提示词只保存在本浏览器。
       </div>
     </>
   );

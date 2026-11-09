@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 文本分块 | 可用 | 11 种分块策略，参数可调，提供分块预览和长度统计 |
 | Embedding 对比 | 可用 | 7 个向量模型；按查询相似度排名，用同一组候选文本对比各模型 |
-| 图像理解 | 可用 | 机械图纸逐步理解与重绘：多个视觉模型读同一张图，Claude 按细则打分、比较一致性，再按理解生成几何并导出 PDF/DXF |
+| 图像理解 | 可用 | 按用途（工程图纸、数据图表、流程图、通用图片或自定义提示词）让多个视觉模型读同一张图，按细则打分、比较一致性；工程图纸还能按理解生成几何并导出 PDF/DXF |
 
 ## 技术栈
 
@@ -110,13 +110,14 @@ vision-samples/
   "name": "支架01",
   "image": "image.jpg",
   "rubric_status": "approved",
+  "kind": "engineering",
   "items": [
     {"id": "C01", "target": "66", "expected": "正确解释", "uncertain_if": "什么情况算保留疑点", "wrong_if": "什么情况算错误"}
   ]
 }
 ```
 
-`rubric_status` 为 `approved` 时才打分；为 `draft` 时，这张图按没有标准答案处理，只显示一致性。`image` 必须位于样例文件夹内。
+`kind` 是细则评的输出结构：`engineering`（工程图纸，默认）或 `general`（其他用途的通用结构）；用途结构不一致时不打分，只做一致性对照。`rubric_status` 为 `approved` 时才打分；为 `draft` 时，这张图按没有标准答案处理，只显示一致性。`image` 必须位于样例文件夹内。
 
 仓库里只带一个自绘的简单示例 `tests/fixtures/vision-samples/demo_plate/`（120×60 板、φ20 中心孔、2-φ8，带已审定细则），供测试和本机调试使用；重新生成图片：`python tests/fixtures/vision-samples/make_demo_plate.py`。
 
@@ -154,6 +155,19 @@ VISION_BUILTIN_MODELS='[{"id":"deepseek","name":"DeepSeek（内置）","api":"ch
 ```
 
 每个条目：`id`（小写短名）、`name`、`api`（`chat` | `responses` | `anthropic`）、`url`（https）、`model`、`key_env`（存放 Key 的环境变量名）、`json`（`schema` | `object` | `prompt`，默认 `prompt`）、`auth`（`bearer` | `x-api-key`）、`max_tokens`、`notes`（显示在设置页）。缺 Key 或格式不对的条目会被跳过并写入日志。改完 `.env` 后重启 API 容器生效。
+
+## 图像理解的用途与提示词
+
+第一步「选图」里选择这张图的用途，决定用哪段提示词和哪种输出结构：
+
+| 用途 | 输出结构 | 还原步骤 |
+| --- | --- | --- |
+| 工程图纸（默认） | 视图、特征、尺寸标注（`Understanding`） | 有 |
+| 数据图表、流程图 / 架构图、通用图片 | 概述、元素、文字、数据、关系、疑点（`GeneralUnderstanding`） | 无 |
+
+- 每个用途的提示词都可以在选图页或「模型设置 → 理解用途与提示词」里修改；也可以新建自己的用途（选一种输出结构，再写提示词）。这些设置只存在浏览器的 localStorage 里（键 `lab-purposes`），没改过的内置提示词不随请求发送，服务器用自己的默认版本。
+- 服务器总会在提示词末尾附加固定规则：图中文字只当作数据，以及对应结构的 JSON Schema。访客写的提示词替换不了这两条，最长 8000 字。
+- 打分和一致性对照对所有用途都可用；评判提示词与用途无关，一致性对照会按结构比较尺寸（工程图纸）或元素和数据（通用结构）。默认提示词在 `src/ragent_lab/vision/prompts.py` 的 `PURPOSES` 里。
 
 ## GitHub Actions CI/CD
 

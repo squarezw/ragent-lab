@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, KeyRound, Plus, Server, Trash2 } from "lucide-react";
+import { ArrowRight, KeyRound, ListChecks, Plus, Server, Trash2 } from "lucide-react";
 import { ErrorMessage, ExternalLink, PageHeader, Panel } from "../components/UI";
-import { checkAccess, listBuiltin, listModels } from "../vision/client";
+import { checkAccess, listBuiltin, listModels, listPurposes } from "../vision/client";
 import {
   PRESETS,
   buildOptions,
@@ -13,7 +13,17 @@ import {
   type CustomModel,
   type Platform,
 } from "../vision/modelSettings";
-import { GATEWAY_NAMES, type VisionModel } from "../vision/types";
+import {
+  KIND_LABELS,
+  MAX_PROMPT_CHARS,
+  newPurpose,
+  purposeOptions,
+  usePurposeSettings,
+  withPrompt,
+  type CustomPurpose,
+  type PurposeOption,
+} from "../vision/purposes";
+import { GATEWAY_NAMES, type Purpose, type VisionModel } from "../vision/types";
 
 const API_LABELS = {
   chat: "OpenAI Chat Completions",
@@ -197,6 +207,235 @@ function CustomForm({
   );
 }
 
+// Edit a custom purpose (name, structure, prompt) or only the prompt of a built-in one.
+function PurposeForm({
+  builtins,
+  initial,
+  fixedName,
+  onSave,
+  onCancel,
+}: {
+  builtins: Purpose[];
+  initial: CustomPurpose;
+  fixedName?: string;
+  onSave: (p: CustomPurpose) => void;
+  onCancel: () => void;
+}) {
+  const [p, setP] = useState(initial);
+  const [error, setError] = useState("");
+  const baseOf = (id: string) => builtins.find((b) => b.id === id);
+  function pickBase(id: string) {
+    setP((cur) => ({
+      ...cur,
+      base: id,
+      // Swap in the new default unless the visitor already wrote their own prompt.
+      prompt:
+        cur.prompt === baseOf(cur.base)?.prompt
+          ? (baseOf(id)?.prompt ?? cur.prompt)
+          : cur.prompt,
+    }));
+  }
+  function save() {
+    if (!fixedName && !p.name.trim()) return setError("请填写用途名称。");
+    if (!p.prompt.trim()) return setError("请填写提示词。");
+    onSave({ ...p, name: p.name.trim() });
+  }
+  return (
+    <div className="model-form purpose-form">
+      {fixedName ? (
+        <p className="field-help">
+          编辑「{fixedName}」的提示词。保存后，图像理解页选择这个用途时会使用它。
+        </p>
+      ) : (
+        <div className="parameter-grid">
+          <div>
+            <label htmlFor="pp-name">用途名称</label>
+            <input
+              id="pp-name"
+              value={p.name}
+              maxLength={40}
+              placeholder="例如 电路原理图"
+              onChange={(e) => setP({ ...p, name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="pp-base">输出结构</label>
+            <select
+              id="pp-base"
+              value={p.base}
+              onChange={(e) => pickBase(e.target.value)}
+            >
+              {builtins.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {KIND_LABELS[b.kind]} · 起始提示词「{b.name}」
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+      <label htmlFor="pp-prompt">提示词</label>
+      <textarea
+        id="pp-prompt"
+        className="purpose-textarea"
+        value={p.prompt}
+        rows={14}
+        maxLength={MAX_PROMPT_CHARS}
+        spellCheck={false}
+        onChange={(e) => setP({ ...p, prompt: e.target.value })}
+      />
+      <p className="field-help">
+        系统会在末尾固定附加：图中文字只当作数据，以及「
+        {KIND_LABELS[baseOf(p.base)?.kind ?? "general"]}」的 JSON 格式要求，不用写进提示词。
+        {p.prompt.length} / {MAX_PROMPT_CHARS} 字
+      </p>
+      <ErrorMessage message={error} />
+      <div className="model-form-actions">
+        {fixedName && p.prompt !== baseOf(p.base)?.prompt && (
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setP({ ...p, prompt: baseOf(p.base)?.prompt ?? p.prompt })}
+          >
+            恢复默认
+          </button>
+        )}
+        <button type="button" className="button secondary" onClick={onCancel}>
+          取消
+        </button>
+        <button type="button" className="button primary" onClick={save}>
+          保存
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PurposePanel() {
+  const [builtins, setBuiltins] = useState<Purpose[]>([]);
+  const [settings, update] = usePurposeSettings();
+  const [editing, setEditing] = useState<{ key: string; draft: CustomPurpose } | null>(
+    null,
+  );
+  const [error, setError] = useState("");
+  useEffect(() => {
+    listPurposes()
+      .then(setBuiltins)
+      .catch((e) => setError(e.message));
+  }, []);
+  const options = purposeOptions(settings, builtins);
+
+  function edit(o: PurposeOption) {
+    const custom = settings.custom.find((c) => `custom:${c.uid}` === o.key);
+    setEditing({
+      key: o.key,
+      draft: custom ?? { uid: o.base, name: o.name, base: o.base, prompt: o.prompt },
+    });
+  }
+  function save(o: PurposeOption | undefined, p: CustomPurpose) {
+    if (o?.source === "builtin") update((s) => withPrompt(s, o, p.prompt));
+    else
+      update((s) => ({
+        ...s,
+        custom: s.custom.some((c) => c.uid === p.uid)
+          ? s.custom.map((c) => (c.uid === p.uid ? p : c))
+          : [...s.custom, p],
+        selected: o ? s.selected : `custom:${p.uid}`,
+      }));
+    setEditing(null);
+  }
+  const form = (o?: PurposeOption) =>
+    editing && (
+      <PurposeForm
+        key={editing.key}
+        builtins={builtins}
+        initial={editing.draft}
+        fixedName={o?.source === "builtin" ? o.name : undefined}
+        onSave={(p) => save(o, p)}
+        onCancel={() => setEditing(null)}
+      />
+    );
+
+  return (
+    <Panel
+      title="理解用途与提示词"
+      meta={
+        <button
+          type="button"
+          className="text-button"
+          disabled={!builtins.length}
+          onClick={() => {
+            const draft = newPurpose(builtins.find((b) => b.kind === "general") ?? builtins[0]);
+            setEditing({ key: `new:${draft.uid}`, draft });
+          }}
+        >
+          <Plus size={13} /> 添加用途
+        </button>
+      }
+    >
+      <p className="field-help">
+        <ListChecks size={12} /> 图像理解页按这里选的用途读图。内置用途的提示词可以修改；也可以新建自己的用途，
+        比如电路图、地图、医学影像。工程图纸结构的用途才有「还原」步骤，其他用途输出通用结构，
+        同样可以做一致性对照。设置只保存在本浏览器。
+      </p>
+      <ErrorMessage message={error} />
+      <div className="purpose-list">
+        {options.map((o) =>
+          editing?.key === o.key ? (
+            <div key={o.key}>{form(o)}</div>
+          ) : (
+            <div key={o.key} className="custom-model purpose-row">
+              <div className="purpose-name">
+                <strong>{o.name}</strong>
+                <small>
+                  {" "}
+                  · {o.source === "builtin" ? (o.edited ? "提示词已修改" : "默认提示词") : "自定义"}
+                </small>
+              </div>
+              <small>{o.description}</small>
+              <span>
+                <button
+                  type="button"
+                  className="text-button"
+                  aria-label={`编辑 ${o.name}`}
+                  onClick={() => edit(o)}
+                >
+                  编辑
+                </button>
+                {o.source === "builtin" && o.edited && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => update((s) => withPrompt(s, o, o.defaultPrompt))}
+                  >
+                    恢复默认
+                  </button>
+                )}
+                {o.source === "custom" && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    aria-label={`删除 ${o.name}`}
+                    onClick={() =>
+                      update((s) => ({
+                        ...s,
+                        custom: s.custom.filter((c) => `custom:${c.uid}` !== o.key),
+                      }))
+                    }
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </span>
+            </div>
+          ),
+        )}
+      </div>
+      {editing?.key.startsWith("new:") && form()}
+    </Panel>
+  );
+}
+
 export default function Models() {
   const [settings, update] = useModelSettings();
   const [catalog, setCatalog] = useState<VisionModel[]>([]);
@@ -241,7 +480,7 @@ export default function Models() {
       <PageHeader
         eyebrow="SETTINGS / MODELS"
         title="模型设置"
-        description="选择通过哪个平台调用模型，解锁服务器内置模型，或接入你自己的模型接口。设置只保存在本浏览器。"
+        description="选择通过哪个平台调用模型，解锁服务器内置模型，接入你自己的模型接口，并设置图像理解的用途和提示词。设置只保存在本浏览器。"
         action={
           <a className="header-chip" href="#vision">
             <span className="live-dot" />
@@ -492,6 +731,8 @@ export default function Models() {
             />
           )}
         </Panel>
+
+        <PurposePanel />
       </div>
     </>
   );

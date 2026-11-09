@@ -14,7 +14,13 @@ from .kie import chat_json as kie_chat_json
 from .openrouter import CallResult, OpenRouterError, chat_json
 from .registry import JUDGE_MODEL, get_model
 from .schema import (ConsensusResult, Geometry, Judgement, JudgeResult, Rubric,
-                     Understanding, model_json_schema_for)
+                     model_json_schema_for)
+
+
+def kind_of(understanding: dict) -> str:
+    """'engineering' (views / dimensions) or 'general' (summary / elements / data)."""
+    return 'engineering' if 'dimensions' in understanding else 'general'
+
 
 _POINTS = {'correct': 1.0, 'uncertain': 0.5, 'wrong': 0.0}
 
@@ -62,14 +68,18 @@ def _dumps(obj) -> str:
 
 
 async def understand(api_key: str, model_id: str | dict, image: PreparedImage,
-                     gateway: str = 'openrouter') -> dict:
+                     gateway: str = 'openrouter', purpose: str = prompts.DEFAULT_PURPOSE,
+                     instructions: str | None = None) -> dict:
+    """instructions replace the purpose's default prompt; the fixed rules and schema stay."""
     model = _model(model_id)
-    messages = [{'role': 'user', 'content': [
-        _image_part(image), {'type': 'text', 'text': prompts.UNDERSTAND}]}]
+    kind = prompts.PURPOSES[purpose]['kind']
+    cls = prompts.schema_class(kind)
+    text = prompts.understand_prompt(purpose, instructions)
+    messages = [{'role': 'user', 'content': [_image_part(image), {'type': 'text', 'text': text}]}]
     call = await _call(gateway, api_key, model, messages, 'understanding',
-                       model_json_schema_for(Understanding))
-    parsed = _validate(Understanding, call.content)
-    return {'model': model['id'], 'model_name': model['name'],
+                       model_json_schema_for(cls))
+    parsed = _validate(cls, call.content)
+    return {'model': model['id'], 'model_name': model['name'], 'purpose': purpose, 'kind': kind,
             'understanding': parsed.model_dump(), 'meta': _meta(call, model, gateway)}
 
 
@@ -137,14 +147,23 @@ async def consensus(api_key: str, results: list[dict], judge: dict = JUDGE_MODEL
                     gateway: str = 'openrouter') -> dict:
     if len(results) > len(string.ascii_uppercase):
         raise ValueError('too many models for consensus')
+    kinds = {kind_of(r['understanding']) for r in results}
+    if len(kinds) != 1:
+        raise ValueError('results mix different understanding structures')
+    general = kinds == {'general'}
     letters = string.ascii_uppercase[:len(results)]
     mapping = {letter: r['model_name'] for letter, r in zip(letters, results)}
     blocks = []
     for letter, r in zip(letters, results):
         u = r['understanding']
-        payload = {'views': u.get('views', []), 'dimensions': u.get('dimensions', [])}
+        if general:
+            payload = {'summary': u.get('summary', ''), 'elements': u.get('elements', []),
+                       'data': u.get('data', [])}
+        else:
+            payload = {'views': u.get('views', []), 'dimensions': u.get('dimensions', [])}
         blocks.append(f'模型 {letter}：\n' + _dumps(payload))
-    text = prompts.CONSENSUS + '\n\n' + '\n\n'.join(blocks)
+    head = prompts.CONSENSUS_GENERAL if general else prompts.CONSENSUS
+    text = head + '\n\n' + '\n\n'.join(blocks)
     messages = [{'role': 'user', 'content': [{'type': 'text', 'text': text}]}]
     call = await _call(gateway, api_key, judge, messages, 'consensus_result',
                        model_json_schema_for(ConsensusResult))
