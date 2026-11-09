@@ -1,24 +1,10 @@
 import { useRef } from "react";
-import { Download, GitCompareArrows, Scale, Upload } from "lucide-react";
+import { Download, GitCompareArrows, Scale, Square, Upload } from "lucide-react";
 import JsonViewer from "../components/JsonViewer";
 import { ErrorMessage, Panel, RunButton } from "../components/UI";
 import ModelStatusCard from "./ModelStatusCard";
 import type { ConsensusEntry, RunEntry } from "./state";
-import type { ConsensusResult, Gateway, PurposeKind, VisionModel } from "./types";
-
-export function formatPrice(
-  price: VisionModel["price"],
-  gateway: Gateway = "openrouter",
-): string {
-  if (gateway === "kie") return "按 Kie.ai 积分计费";
-  if (!price || price.prompt == null || price.completion == null)
-    return "价格未知";
-  const perM = (v: string) => {
-    const n = Number(v) * 1e6;
-    return Number.isFinite(n) ? `$${n.toFixed(2)}` : "?";
-  };
-  return `输入 ${perM(price.prompt)} · 输出 ${perM(price.completion)} / 百万 token`;
-}
+import type { ConsensusResult, PurposeKind, VisionModel } from "./types";
 
 type ConsensusRow = {
   key: string;
@@ -75,6 +61,9 @@ export default function StepUnderstand({
   onStart,
   onRetry,
   onRetryScore,
+  onCancel,
+  onCancelAll,
+  onCancelConsensus,
   onConsensus,
   onExport,
   onImport,
@@ -95,6 +84,9 @@ export default function StepUnderstand({
   onStart: () => void;
   onRetry: (model: string) => void;
   onRetryScore: (model: string) => void;
+  onCancel: (model: string) => void;
+  onCancelAll: () => void;
+  onCancelConsensus: () => void;
   onConsensus: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
@@ -111,6 +103,8 @@ export default function StepUnderstand({
   );
   const done = cards.filter((r) => r.status === "done");
   const consensusBusy = consensus?.status === "running";
+  const anyBusy =
+    running || consensusBusy || cards.some((r) => r.scoreStatus === "running");
   return (
     <>
       <div className="vision-toolbar">
@@ -130,7 +124,7 @@ export default function StepUnderstand({
               ),
             )}
           </select>
-          <span>打分和一致性对照都用它，费用计入你的 Key</span>
+          <span>打分和一致性对照都用它</span>
         </div>
         <div>
           <button
@@ -198,7 +192,7 @@ export default function StepUnderstand({
                 />
                 <span>
                   <strong>{m.name}</strong>
-                  <small>{m.priceLabel ?? formatPrice(m.price)}</small>
+                  {m.tag && <small>{m.tag}</small>}
                 </span>
               </label>
             ))}
@@ -217,6 +211,12 @@ export default function StepUnderstand({
               </h2>
               {purposeName && <p className="field-help">用途：{purposeName}</p>}
             </div>
+            {anyBusy && (
+              <button type="button" className="button secondary" onClick={onCancelAll}>
+                <Square size={11} />
+                取消全部任务
+              </button>
+            )}
             {done.length > 0 && kind === "engineering" && (
               <button type="button" className="text-button" onClick={onNext}>
                 下一步：还原 →
@@ -231,6 +231,7 @@ export default function StepUnderstand({
                 scorable={scorable}
                 onRetry={() => onRetry(run.model)}
                 onRetryScore={() => onRetryScore(run.model)}
+                onCancel={() => onCancel(run.model)}
               />
             ))}
           </div>
@@ -254,6 +255,12 @@ export default function StepUnderstand({
             <GitCompareArrows size={15} />
             {consensusBusy ? "对照生成中…" : "生成一致性对照"}
           </button>
+          {consensusBusy && (
+            <button type="button" className="button secondary" onClick={onCancelConsensus}>
+              <Square size={11} />
+              取消
+            </button>
+          )}
           {done.length < 2 && (
             <p className="field-help">至少需要 2 个模型完成理解。</p>
           )}

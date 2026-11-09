@@ -19,8 +19,8 @@ export type VisionModel = {
   };
   price: { prompt: string | null; completion: string | null } | null;
   gateways?: Gateway[];
-  // Set for options built from the model settings (badge · price or host).
-  priceLabel?: string;
+  // Set for options built from the model settings: where the call goes (platform badge).
+  tag?: string;
 };
 
 // Which output structure an understanding uses (see vision/prompts.py PURPOSES).

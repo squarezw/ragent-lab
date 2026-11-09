@@ -131,6 +131,42 @@ class JobRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(runner.get(first.id))
         self.assertIsNotNone(runner.get(third.id))
 
+    async def test_cancel_running_and_queued(self):
+        runner = JobRunner(max_concurrent=1)
+        closed = []
+
+        async def slow():
+            try:
+                await asyncio.sleep(30)
+            finally:
+                closed.append(True)  # e.g. the upstream stream being closed
+            return {'ok': True}
+
+        running = runner.submit('model', 'a', slow)
+        queued = runner.submit('model', 'b', slow)
+        await asyncio.sleep(0.02)
+        self.assertEqual((running.status, queued.status), ('running', 'queued'))
+        self.assertIs(runner.cancel(queued.id), queued)
+        await wait_done(runner, queued)
+        self.assertEqual((queued.status, queued.error_kind), ('failed', 'cancelled'))
+        self.assertIsNone(queued.started)
+        runner.cancel(running.id)
+        await wait_done(runner, running)
+        self.assertEqual((running.error, running.error_kind), (jobs.CANCELLED_MESSAGE, 'cancelled'))
+        self.assertEqual(closed, [True])
+        self.assertIsNotNone(running.finished)
+
+    async def test_cancel_finished_or_unknown(self):
+        runner = JobRunner()
+
+        async def quick():
+            return {'ok': True}
+
+        job = runner.submit('model', 'a', quick)
+        await wait_done(runner, job)
+        self.assertEqual(runner.cancel(job.id).status, 'done')
+        self.assertIsNone(runner.cancel('nope'))
+
 
 class ConstructionTests(unittest.TestCase):
     def test_construct_without_loop(self):

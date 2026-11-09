@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ErrorMessage, PageHeader } from "../components/UI";
 import {
+  cancelJob,
   listBuiltin,
   listModels,
   listPurposes,
@@ -58,6 +59,8 @@ const toRun = (o: PurposeOption): RunPurpose => ({
   kind: o.kind,
   request: purposeRequest(o),
 });
+const CANCELLED = "已取消。";
+const isPending = (s?: string) => s === "queued" || s === "running";
 const isAbort = (e: unknown) => (e as Error)?.name === "AbortError";
 const isImageGone = (e: unknown) =>
   ((e as Error)?.message ?? "").includes("图片已过期");
@@ -68,8 +71,17 @@ async function runJob<T>(
   signal: AbortSignal,
 ): Promise<T> {
   const id = await submit(kind, body);
-  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-  return pollJob<T>(id, { signal });
+  if (signal.aborted) {
+    cancelJob(id);
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const stop = () => cancelJob(id);
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    return await pollJob<T>(id, { signal });
+  } finally {
+    signal.removeEventListener("abort", stop);
+  }
 }
 
 let generationSeq = 0;
@@ -89,6 +101,8 @@ export default function Vision() {
   const [actionError, setActionError] = useState("");
   // Every in-flight poll listens to this controller; replaced on re-select / import, aborted on unmount.
   const ctrl = useRef(new AbortController());
+  // One controller per task (run:<model>, score:<model>, consensus, gen:<id>), under ctrl.
+  const tasks = useRef(new Map<string, AbortController>());
   // The uploaded file, kept so it can be re-sent if the server no longer has the image.
   const uploadFile = useRef<File | undefined>(undefined);
   const imageNow = useRef<ImageRef | null>(null);
@@ -119,7 +133,29 @@ export default function Vision() {
   function resetJobs() {
     ctrl.current.abort();
     ctrl.current = new AbortController();
+    tasks.current.clear();
     setActionError("");
+  }
+  // A fresh signal for one task; aborting the page-wide controller aborts it too.
+  function track(key: string): AbortSignal {
+    tasks.current.get(key)?.abort();
+    const c = new AbortController();
+    const parent = ctrl.current.signal;
+    if (parent.aborted) c.abort();
+    else parent.addEventListener("abort", () => c.abort(), { once: true });
+    tasks.current.set(key, c);
+    return c.signal;
+  }
+  function untrack(key: string, signal: AbortSignal) {
+    if (tasks.current.get(key)?.signal === signal) tasks.current.delete(key);
+  }
+  // Abort a task's poll (which also asks the server to stop it). False if not running.
+  function stop(key: string): boolean {
+    const c = tasks.current.get(key);
+    if (!c) return false;
+    c.abort();
+    tasks.current.delete(key);
+    return true;
   }
   // Everything the settings page enabled; only "ready" ones (key / code filled) can run.
   const options = buildOptions(settings, models, builtin);
@@ -133,7 +169,7 @@ export default function Vision() {
     notes: "",
     params: { max_tokens: null, temperature: null, reasoning: null },
     price: null,
-    priceLabel: `${o.badge} · ${o.priceLabel}`,
+    tag: o.badge,
   }));
   const selected = available
     .map((m) => m.id)
@@ -207,7 +243,8 @@ export default function Vision() {
     understanding: AnyUnderstanding,
     image: ImageRef,
   ) {
-    const signal = ctrl.current.signal;
+    const key = `score:${model}`;
+    const signal = track(key);
     dispatch({
       type: "scoreUpdate",
       model,
@@ -232,6 +269,8 @@ export default function Vision() {
           model,
           patch: { scoreStatus: "failed", scoreError: (e as Error).message },
         });
+    } finally {
+      untrack(key, signal);
     }
   }
 
@@ -239,7 +278,8 @@ export default function Vision() {
     const image = state.image;
     if (!image) return;
     const scorable = scorableFor(run.kind);
-    const signal = ctrl.current.signal;
+    const key = `run:${model}`;
+    const signal = track(key);
     const name =
       options.find((o) => o.key === model)?.name ??
       state.runs[model]?.model_name ??
@@ -267,6 +307,7 @@ export default function Vision() {
         ),
       );
       if (signal.aborted) return;
+      untrack(key, signal);
       dispatch({
         type: "runUpdate",
         model,
@@ -285,7 +326,36 @@ export default function Vision() {
           model,
           patch: { status: "failed", error: (e as Error).message },
         });
+    } finally {
+      untrack(key, signal);
     }
+  }
+
+  function cancelRun(model: string) {
+    const r = state.runs[model];
+    if (stop(`run:${model}`) || isPending(r?.status))
+      dispatch({ type: "runUpdate", model, patch: { status: "cancelled", error: undefined } });
+    if (stop(`score:${model}`) || r?.scoreStatus === "running")
+      dispatch({
+        type: "scoreUpdate",
+        model,
+        patch: { scoreStatus: "failed", scoreError: CANCELLED },
+      });
+  }
+  function cancelConsensus() {
+    stop("consensus");
+    if (state.consensus?.status === "running")
+      dispatch({ type: "consensusUpdate", consensus: { status: "failed", error: CANCELLED } });
+  }
+  function cancelGeneration(id: string) {
+    stop(`gen:${id}`);
+    dispatch({ type: "generationUpdate", id, patch: { status: "cancelled" } });
+  }
+  function cancelAll() {
+    for (const r of Object.values(state.runs))
+      if (isPending(r.status) || r.scoreStatus === "running") cancelRun(r.model);
+    cancelConsensus();
+    for (const g of state.generations) if (isPending(g.status)) cancelGeneration(g.id);
   }
 
   function startAll() {
@@ -312,7 +382,7 @@ export default function Vision() {
 
   async function consensus() {
     if (!requireModels()) return;
-    const signal = ctrl.current.signal;
+    const signal = track("consensus");
     const results = Object.values(state.runs)
       .filter((r) => r.status === "done" && r.understanding)
       .map((r) => ({
@@ -337,6 +407,8 @@ export default function Vision() {
           type: "consensusUpdate",
           consensus: { status: "failed", error: (e as Error).message },
         });
+    } finally {
+      untrack("consensus", signal);
     }
   }
 
@@ -346,8 +418,8 @@ export default function Vision() {
     const image = state.image;
     if (!understanding || !isEngineering(understanding) || !image || !requireModels())
       return;
-    const signal = ctrl.current.signal;
     const id = `gen-${Date.now()}-${++generationSeq}`;
+    const signal = track(`gen:${id}`);
     dispatch({
       type: "generationAdd",
       entry: { id, sourceModel, generator, status: "running" },
@@ -380,6 +452,8 @@ export default function Vision() {
           id,
           patch: { status: "failed", error: (e as Error).message },
         });
+    } finally {
+      untrack(`gen:${id}`, signal);
     }
   }
 
@@ -497,6 +571,9 @@ export default function Vision() {
           onStart={startAll}
           onRetry={retry}
           onRetryScore={retryScore}
+          onCancel={cancelRun}
+          onCancelAll={cancelAll}
+          onCancelConsensus={cancelConsensus}
           onConsensus={() => void consensus()}
           onExport={exportJson}
           onImport={(f) => void importJson(f)}
@@ -512,6 +589,7 @@ export default function Vision() {
           imageName={state.imageName}
           error={actionError}
           onGenerate={(s, g) => void generate(s, g)}
+          onCancel={cancelGeneration}
         />
       )}
       <div className="bottom-tip">

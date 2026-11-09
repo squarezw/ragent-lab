@@ -160,11 +160,19 @@ type Job = {
   purpose?: string;
   polls: number;
   fail?: string;
+  hang?: boolean;
+  cancelled?: boolean;
 };
 
 async function mockVision(
   page: Page,
-  opts: { samples: unknown[]; failOnce?: string; uploadGoneOnce?: boolean },
+  opts: {
+    samples: unknown[];
+    failOnce?: string;
+    uploadGoneOnce?: boolean;
+    hang?: boolean;
+    cancelled?: string[];
+  },
 ) {
   const jobs = new Map<string, Job>();
   let uploads = 0;
@@ -284,6 +292,7 @@ async function mockVision(
           model: id,
           gateway: body.model?.gateway,
           purpose: body.purpose,
+          hang: opts.hang,
           fail: fail ? "OpenRouter Key 无效或已撤销。" : undefined,
         }),
       );
@@ -295,6 +304,13 @@ async function mockVision(
         body: "0\nEOF\n",
         contentType: "application/dxf",
       });
+    const c = path.match(/^\/jobs\/(.+)\/cancel$/);
+    if (c) {
+      const job = jobs.get(c[1]);
+      if (job) job.cancelled = true;
+      opts.cancelled?.push(c[1]);
+      return route.fulfill({ json: { id: c[1], status: "failed", error_kind: "cancelled" } });
+    }
     const m = path.match(/^\/jobs\/(.+)$/);
     if (m) {
       const job = jobs.get(m[1]);
@@ -309,7 +325,11 @@ async function mockVision(
         finished: null,
         error_kind: null,
       };
-      if (job.polls === 1)
+      if (job.cancelled)
+        return route.fulfill({
+          json: { ...base, status: "failed", result: null, error: "任务已取消。" },
+        });
+      if (job.polls === 1 || job.hang)
         return route.fulfill({
           json: { ...base, status: "running", result: null, error: null },
         });
@@ -369,8 +389,9 @@ test("vision: understand two models, score, redraw and download", async ({
   await expect(cards.filter({ hasText: "75.0" })).toHaveCount(2, {
     timeout: 20000,
   });
-  await expect(cards.first()).toContainText("费用");
-  await expect(page.getByText("价格未知")).toBeVisible();
+  // No prices or fees on the comparison page.
+  await expect(cards.first()).not.toContainText("费用");
+  await expect(page.getByText("价格未知")).toHaveCount(0);
   await cards.first().getByText("逐项评分").click();
   await expect(cards.first().locator("table")).toContainText("外径 Ø120");
   await cards.first().getByRole("button", { name: "查看完整 JSON" }).click();
@@ -476,10 +497,11 @@ test("vision: settings pick a platform per model and keys can stay unsaved", asy
   await expect(page.getByText("已就绪 1 个模型")).toBeVisible();
   await expect(page.getByText(/Model B：未填写 OpenRouter Key/)).toBeVisible();
   await page.getByRole("button", { name: "下一步：理解对比" }).click();
-  await expect(page.getByText("Kie.ai · 按 Kie.ai 积分计费")).toBeVisible();
+  await expect(page.locator(".vision-model-option small")).toHaveText("Kie.ai");
   await page.getByRole("button", { name: "开始理解" }).click();
   const card = page.locator(".vision-model-card", { hasText: "Model A" });
-  await expect(card).toContainText("0.28 积分", { timeout: 20000 });
+  await expect(card).toContainText("已完成", { timeout: 20000 });
+  await expect(card).not.toContainText("积分");
   expect(bodies).toHaveLength(1);
   expect(bodies[0].model).toEqual({
     source: "catalog",
@@ -518,7 +540,7 @@ test("vision: a custom model from a platform preset runs with its own key", asyn
   await page.getByRole("link", { name: /去图像理解/ }).click();
   await page.getByRole("button", { name: /法兰盘/ }).click();
   await page.getByRole("button", { name: "下一步：理解对比" }).click();
-  await expect(page.getByText("自定义 · api.deepseek.com")).toBeVisible();
+  await expect(page.locator(".vision-model-option", { hasText: "我的 DeepSeek" }).locator("small")).toHaveText("自定义");
   await page.getByRole("button", { name: "开始理解" }).click();
   await expect(
     page.locator(".vision-model-card", { hasText: "我的 DeepSeek" }),
@@ -620,4 +642,33 @@ test("vision: a custom purpose is saved and selected", async ({ page }) => {
   ).toContainText("自定义");
   await page.getByRole("link", { name: /去图像理解/ }).click();
   await expect(page.getByLabel("这张图是")).toHaveValue(/^custom:/);
+});
+
+test("vision: running tasks can be cancelled one by one or all at once", async ({
+  page,
+}) => {
+  const cancelled: string[] = [];
+  await mockVision(page, { samples: [], hang: true, cancelled });
+  await page.goto("/#vision");
+  await page.getByLabel("上传图片").setInputFiles({
+    name: "mine.png",
+    mimeType: "image/png",
+    buffer: PNG_1x1,
+  });
+  await startUnderstanding(page);
+  const a = page.locator(".vision-model-card", { hasText: "Model A" });
+  const b = page.locator(".vision-model-card", { hasText: "Model B" });
+  await expect(a).toContainText("运行中");
+  await a.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(a).toContainText("已取消");
+  await expect(a.getByRole("button", { name: "重试", exact: true })).toBeVisible();
+  await expect(b).toContainText("运行中");
+  await expect.poll(() => cancelled.length).toBe(1);
+  await page.getByRole("button", { name: "取消全部任务" }).click();
+  await expect(b).toContainText("已取消");
+  await expect.poll(() => cancelled.length).toBe(2);
+  await expect(page.getByRole("button", { name: "取消全部任务" })).toHaveCount(0);
+  // Still cancelled after a few poll intervals: nothing keeps polling or overwrites it.
+  await page.waitForTimeout(2500);
+  await expect(page.locator(".vision-model-card", { hasText: "已取消" })).toHaveCount(2);
 });

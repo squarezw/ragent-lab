@@ -43,7 +43,7 @@ describe("buildOptions", () => {
       gateway: "openrouter",
       api_key: "sk-or",
     });
-    expect(ok[0].priceLabel).toContain("$1.00");
+    expect(ok[0]).not.toHaveProperty("priceLabel");
   });
 
   it("uses the chosen platform and ignores one the model is not on", () => {
@@ -55,7 +55,7 @@ describe("buildOptions", () => {
       },
     });
     const [claude, qwen] = buildOptions(s, CATALOG, null);
-    expect(claude).toMatchObject({ ready: true, badge: "Kie.ai", priceLabel: "按 Kie.ai 积分计费" });
+    expect(claude).toMatchObject({ ready: true, badge: "Kie.ai" });
     expect(qwen).toMatchObject({ ready: false, badge: "OpenRouter" });
   });
 
@@ -82,7 +82,7 @@ describe("buildOptions", () => {
       api_key: "sk-ds",
     };
     const [opt] = buildOptions(settings({ custom: [c] }), [], null);
-    expect(opt).toMatchObject({ ready: true, badge: "自定义", priceLabel: "api.deepseek.com" });
+    expect(opt).toMatchObject({ ready: true, badge: "自定义" });
     expect(opt.ref).toEqual({
       source: "custom",
       name: "DeepSeek 官方",

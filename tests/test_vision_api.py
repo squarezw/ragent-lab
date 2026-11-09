@@ -1,4 +1,5 @@
 """Vision HTTP API tests. Model services are doubles; no network, no real keys."""
+import asyncio
 import io
 import json
 import os
@@ -338,6 +339,34 @@ class PurposeAPITests(unittest.TestCase):
                 'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL,
                 'understanding': GENERAL, 'api_key': KEY})
             self.assertEqual(r.status_code, 422)
+
+
+class CancelAPITests(unittest.TestCase):
+    _wait = VisionAPITests._wait
+
+    def setUp(self):
+        VisionAPITests.setUp(self)
+
+    def test_cancel_job(self):
+        started = []
+
+        async def hang(*a, **k):
+            started.append(True)
+            await asyncio.sleep(30)
+
+        with patch('ragent_lab.api.vision.service.understand', hang), TestClient(app) as client:
+            r = client.post('/api/vision/understand', json={
+                'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'api_key': KEY})
+            jid = r.json()['job_id']
+            for _ in range(50):
+                if started:
+                    break
+                time.sleep(0.02)
+            r = client.post(f'/api/vision/jobs/{jid}/cancel')
+            self.assertEqual(r.status_code, 200)
+            job, _ = self._wait(client, jid)
+            self.assertEqual((job['status'], job['error_kind']), ('failed', 'cancelled'))
+            self.assertEqual(client.post('/api/vision/jobs/nope/cancel').status_code, 404)
 
 
 class RenderBoundTests(unittest.TestCase):

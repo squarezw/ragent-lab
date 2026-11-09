@@ -42,6 +42,13 @@ export async function uploadImage(file: File): Promise<UploadedImage> {
   return (await response.json()) as UploadedImage;
 }
 
+// Ask the server to stop a job (closes the upstream model call). Best effort.
+export function cancelJob(id: string): void {
+  void fetch(`/api/vision/jobs/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  }).catch(() => undefined);
+}
+
 export type SubmitKind = "understand" | "score" | "consensus" | "generate";
 
 export async function submit(kind: SubmitKind, body: unknown): Promise<string> {
