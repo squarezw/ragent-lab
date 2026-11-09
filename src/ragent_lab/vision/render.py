@@ -34,9 +34,15 @@ _LAYERS = {
 # Same scale convention as ezdxf's setup linetypes (CENTER = 5.08 units per cycle).
 _HIDDEN_PATTERN = [0.9525, 0.635, -0.3175]
 _LTSCALE = 5.0
-# ezdxf's setup dimstyles assume 1 unit = 1 m and display cm (dimlfac=100); we draw in mm.
-_DIM_OVERRIDE = {'dimlfac': 1.0, 'dimtxt': 3.5, 'dimasz': 3.0, 'dimexe': 2.0, 'dimexo': 1.0,
-                 'dimgap': 1.0, 'dimdec': 2, 'dimtxsty': CJK_STYLE}
+# Our own dimension style, in mm, used by every dimension and set as the default.
+# ezdxf's setup dimstyles assume 1 unit = 1 m and display cm (dimlfac=100); CAD programs
+# that ignore per-dimension overrides then show R128 as 12800, so they are not added at all.
+DIM_STYLE = 'LAB_MM'
+_DIM_STYLE_ATTRS = {
+    'dimlfac': 1.0, 'dimscale': 1.0, 'dimtxt': 3.5, 'dimasz': 3.0, 'dimexe': 2.0,
+    'dimexo': 1.0, 'dimgap': 1.0, 'dimdec': 2, 'dimzin': 8, 'dimlunit': 2, 'dimtad': 1,
+    'dimtxsty': CJK_STYLE,
+}
 # White paper: ezdxf then draws ACI 7 (OUTLINE) black instead of white.
 _DRAW_CONFIG = config.Configuration(background_policy=config.BackgroundPolicy.WHITE)
 _SKIPPED_ATTR = 'vision_skipped'
@@ -75,24 +81,22 @@ def _add_dimension(msp, e: DimensionE, attribs: dict) -> None:
         raise ValueError('dimension p1 equals p2')
     text = e.text if e.text else '<>'
     color = _LAYERS[e.layer][0]  # dimension block lines/text follow the layer colour
-    override = {**_DIM_OVERRIDE, 'dimclrd': color, 'dimclre': color, 'dimclrt': color}
+    override = {'dimclrd': color, 'dimclre': color, 'dimclrt': color}
+    common = {'text': text, 'dimstyle': DIM_STYLE, 'override': override, 'dxfattribs': attribs}
     if e.dimtype == 'linear':
-        dim = msp.add_linear_dim(base=loc, p1=p1, p2=p2, angle=e.angle, text=text,
-                                 override=override, dxfattribs=attribs)
+        dim = msp.add_linear_dim(base=loc, p1=p1, p2=p2, angle=e.angle, **common)
     elif e.dimtype == 'aligned':
         # signed perpendicular offset of `location` from the p1->p2 line (left side positive)
         dx, dy = p2[0] - p1[0], p2[1] - p1[1]
         distance = (dx * (loc[1] - p1[1]) - dy * (loc[0] - p1[0])) / math.hypot(dx, dy)
-        dim = msp.add_aligned_dim(p1=p1, p2=p2, distance=distance, text=text,
-                                  override=override, dxfattribs=attribs)
+        dim = msp.add_aligned_dim(p1=p1, p2=p2, distance=distance, **common)
     elif e.dimtype == 'diameter':  # p1, p2 = diameter end points
         center = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
         radial = _radial_args(center, p2, loc, _dist(p1, p2) / 2)
-        dim = msp.add_diameter_dim(center=center, **radial, text=text,
-                                   override=override, dxfattribs=attribs)
+        dim = msp.add_diameter_dim(center=center, **radial, **common)
     else:  # radius: p1 = center, p2 = point on the circle
         dim = msp.add_radius_dim(center=p1, **_radial_args(p1, p2, loc, _dist(p1, p2)),
-                                 text=text, override=override, dxfattribs=attribs)
+                                 **common)
     dim.render()
 
 
@@ -118,13 +122,16 @@ def _add_entity(msp, e) -> None:
 
 def build_doc(geometry: Geometry) -> Drawing:
     """Build an editable DXF document; entities that fail are skipped and listed on the doc."""
-    doc = ezdxf.new('R2018', setup=True, units=units.MM)
+    doc = ezdxf.new('R2018', setup=['linetypes', 'styles'], units=units.MM)
     doc.header['$LTSCALE'] = _LTSCALE
+    doc.header['$DIMLFAC'] = 1.0
     if 'HIDDEN' not in doc.linetypes:
         doc.linetypes.add('HIDDEN', pattern=_HIDDEN_PATTERN, description='Hidden __ __ __')
     for name, (color, linetype, lineweight) in _LAYERS.items():
         doc.layers.add(name, color=color, linetype=linetype, lineweight=lineweight)
     doc.styles.add(CJK_STYLE, font=CJK_FONT)
+    doc.dimstyles.add(DIM_STYLE, dxfattribs=_DIM_STYLE_ATTRS)
+    doc.header['$DIMSTYLE'] = DIM_STYLE
     skipped: list[str] = []
     msp = doc.modelspace()
     for index, entity in enumerate(geometry.entities):
