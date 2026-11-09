@@ -63,6 +63,12 @@ CONFIG = json.dumps([
     {'id': 'nokey', 'name': 'X', 'url': 'https://x.example.com', 'key_env': 'MISSING'},
     {'id': 'BAD ID', 'name': 'X', 'url': 'https://x.example.com', 'key_env': 'DS_KEY'},
     {'id': 'plain', 'name': 'X', 'url': 'http://x.example.com', 'key_env': 'DS_KEY'},
+    {'id': 'fast', 'name': 'Fast', 'url': 'https://api.deepseek.com/chat/completions',
+     'key_env': 'DS_KEY', 'extra': {'thinking': {'type': 'disabled'}}},
+    {'id': 'hijack', 'name': 'X', 'url': 'https://x.example.com', 'key_env': 'DS_KEY',
+     'extra': {'messages': []}},
+    {'id': 'listy', 'name': 'X', 'url': 'https://x.example.com', 'key_env': 'DS_KEY',
+     'extra': ['nope']},
 ])
 
 
@@ -76,12 +82,15 @@ class BuiltinTests(unittest.TestCase):
 
     def test_loads_valid_entries_only(self):
         b = self.make()
-        self.assertEqual(list(b.models), ['deepseek'])
+        self.assertEqual(list(b.models), ['deepseek', 'fast'])
+        self.assertEqual(b.models['fast']['endpoint']['extra'], {'thinking': {'type': 'disabled'}})
+        self.assertEqual(b.models['deepseek']['endpoint']['extra'], {})
         m = b.models['deepseek']
         self.assertEqual(m['endpoint']['json'], 'object')
         self.assertEqual(m['api_key'], 'sk-server-secret')
-        self.assertEqual(b.public_list(), [{'id': 'deepseek', 'name': 'DeepSeek（内置）',
-                                            'notes': '服务器付费'}])
+        self.assertEqual(b.public_list()[0], {'id': 'deepseek', 'name': 'DeepSeek（内置）',
+                                              'notes': '服务器付费'})
+        self.assertNotIn('thinking', json.dumps(b.public_list()))
         self.assertNotIn('sk-server-secret', json.dumps(b.public_list()))
 
     def test_disabled_without_access_code(self):
@@ -154,6 +163,14 @@ class CustomEndpointTests(unittest.TestCase):
                 asks_json = 'JSON' in body['messages'][0]['content'][-1].get('text', '')
                 self.assertEqual(asks_json, mode != 'schema')
                 self.assertEqual((r.content, r.provider), ({'a': 1}, 'api.deepseek.com'))
+
+    def test_extra_is_merged_into_body(self):
+        seen = []
+        call(self.ep(extra={'thinking': {'type': 'disabled'}}),
+             lambda req: seen.append(req) or chat_ok())
+        body = json.loads(seen[0].content)
+        self.assertEqual(body['thinking'], {'type': 'disabled'})
+        self.assertTrue(body['stream'])
 
     def test_anthropic_native_headers(self):
         seen = []

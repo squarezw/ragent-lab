@@ -11,6 +11,8 @@
         auth       "bearer" | "x-api-key"                        (default "bearer")
         max_tokens                                               (default 32000)
         notes      optional text shown on the settings page
+        extra      optional JSON object merged into the request body, e.g.
+                   {"thinking": {"type": "disabled"}} for DeepSeek without thinking
     LAB_ACCESS_CODE          visitors must enter it to use built-in models; unset = disabled
     VISION_BUILTIN_PER_HOUR  model calls per visitor IP per hour (default 60)
 
@@ -33,6 +35,8 @@ _ID = re.compile(r'^[a-z0-9][a-z0-9_.-]{0,39}$')
 _APIS = ('chat', 'responses', 'anthropic')
 _JSON = ('schema', 'object', 'prompt')
 _AUTH = ('bearer', 'x-api-key')
+# Body fields the client builds itself; extra may not replace them.
+_RESERVED = {'model', 'messages', 'input', 'stream', 'system'}
 
 WINDOW_SECONDS = 3600.0
 FAILED_CODE_LIMIT = 10  # wrong access codes per IP per window before lock-out
@@ -59,6 +63,9 @@ def _parse(raw: str, env) -> dict[str, dict]:
             url = str(item['url'])
             if not url.startswith('https://'):
                 raise ValueError('url must be https')
+            extra = item.get('extra') or {}
+            if not isinstance(extra, dict) or _RESERVED & set(extra):
+                raise ValueError('extra must be an object without ' + '/'.join(sorted(_RESERVED)))
             key = env.get(str(item['key_env']), '')
             if not key:
                 log.warning('built-in model %s skipped: %s is not set', mid, item['key_env'])
@@ -70,7 +77,8 @@ def _parse(raw: str, env) -> dict[str, dict]:
                 'temperature': None, 'reasoning': None,
                 'api_key': key,
                 'endpoint': {'api': api, 'url': url, 'model': item.get('model'), 'json': mode,
-                             'auth': auth, 'label': str(item.get('name') or mid)},
+                             'auth': auth, 'label': str(item.get('name') or mid),
+                             'extra': extra},
             }
         except (KeyError, TypeError, ValueError) as exc:
             log.warning('VISION_BUILTIN_MODELS[%d] skipped: %s', n, exc)
