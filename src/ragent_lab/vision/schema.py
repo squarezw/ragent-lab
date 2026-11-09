@@ -1,9 +1,11 @@
 """Pydantic schemas for the engineering-drawing understanding and redraw lab."""
 import copy
+import json
 import math
-from typing import Annotated, Literal, Union
+import re
+from typing import Annotated, Literal, Union, get_args
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 MAX_ENTITIES = 5000
 MAX_COORD = 10000.0
@@ -17,100 +19,177 @@ Layer = Literal['OUTLINE', 'CENTER', 'HIDDEN', 'DIM', 'TEXT']
 
 
 # ---- Understanding -------------------------------------------------------
+# Models fill these from the image; a reply is only *asked* to follow the schema (some routes
+# can't enforce it), so small slips are repaired instead of failing a minutes-long run:
+# null -> empty, an unknown category -> "other", an unreadable number -> unknown, a single
+# string where a list belongs -> a one-item list. Only the overall shape stays strict
+# (views and dimensions for drawings, summary for the general structure).
 
 class _Base(BaseModel):
     model_config = ConfigDict(extra='ignore')
 
 
+def _text(v):
+    if v is None:
+        return ''
+    if isinstance(v, str):
+        return v
+    if isinstance(v, (int, float, bool)):
+        return str(v)
+    if isinstance(v, list):
+        return '；'.join(_text(x) for x in v)
+    return json.dumps(v, ensure_ascii=False)
+
+
+def _items(v):
+    if v is None:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def _objects(v):
+    """A list of objects: drop entries that are not objects."""
+    return [x for x in _items(v) if isinstance(x, dict)]
+
+
+_NUMBER = re.compile(r'[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
+
+
+def _num(v):
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if math.isfinite(v) else None
+    if isinstance(v, str):
+        m = _NUMBER.search(v.replace('，', ','))
+        return float(m.group()) if m else None
+    return None
+
+
+def _confidence(v):
+    n = _num(v)
+    if n is None:
+        return 0.5
+    if 1 < n <= 100:  # a percentage
+        n /= 100
+    return min(max(n, 0.0), 1.0)
+
+
+def _point(v, size=2):
+    if not isinstance(v, (list, tuple)) or len(v) < size:
+        return None
+    nums = [_num(x) for x in v[:size]]
+    return None if None in nums else nums
+
+
+def _enum(literal):
+    allowed = set(get_args(literal))
+
+    def pick(v):
+        key = _text(v).strip().lower().replace('-', '_').replace(' ', '_')
+        return key if key in allowed else 'other'
+    return BeforeValidator(pick)
+
+
+Text = Annotated[str, BeforeValidator(_text)]
+TextList = Annotated[list[Text], BeforeValidator(_items)]
+Num = Annotated[float | None, BeforeValidator(_num)]
+Confidence = Annotated[float, BeforeValidator(_confidence)]
+DimensionKind = Literal['linear', 'diameter', 'radius', 'angle', 'count', 'other']
+
+
 class Part(_Base):
-    name: str
-    drawing_number: str = ''
-    material: str = ''
-    scale: str = ''
-    notes: list[str] = []
+    name: Text = ''
+    drawing_number: Text = ''
+    material: Text = ''
+    scale: Text = ''
+    notes: TextList = []
 
 
 class View(_Base):
-    id: str
-    type: ViewType
-    name: str
-    purpose: str = ''
-    bbox: list[float] | None = None
-    relation: str = ''
+    id: Text = ''
+    type: Annotated[ViewType, _enum(ViewType)] = 'other'
+    name: Text = ''
+    purpose: Text = ''
+    bbox: Annotated[list[float] | None, BeforeValidator(lambda v: _point(v, 4))] = None
+    relation: Text = ''
 
 
 class Feature(_Base):
-    id: str
-    view_id: str = ''
-    type: FeatureType
-    description: str = ''
-    center: list[float] | None = None
-    radius: float | None = None
-    points: list[list[float]] = []
-    start_angle: float | None = None
-    end_angle: float | None = None
-    pattern: str = ''
-    visible: bool = True
+    id: Text = ''
+    view_id: Text = ''
+    type: Annotated[FeatureType, _enum(FeatureType)] = 'other'
+    description: Text = ''
+    center: Annotated[list[float] | None, BeforeValidator(_point)] = None
+    radius: Num = None
+    points: Annotated[list[list[float]], BeforeValidator(
+        lambda v: [q for q in (_point(x) for x in _items(v)) if q is not None])] = []
+    start_angle: Num = None
+    end_angle: Num = None
+    pattern: Text = ''
+    visible: Annotated[bool, BeforeValidator(
+        lambda v: True if v is None else (v.strip().lower() not in ('false', 'no', '0', '否')
+                                          if isinstance(v, str) else bool(v)))] = True
 
 
 class Dimension(_Base):
-    id: str
-    label: str = ''
-    value: float | None = None
-    kind: Literal['linear', 'diameter', 'radius', 'angle', 'count', 'other'] = 'other'
-    view_id: str = ''
-    feature_ids: list[str] = []
-    from_ref: str = ''
-    to_ref: str = ''
-    confidence: float = 1.0
-    uncertainty: str = ''
+    id: Text = ''
+    label: Text = ''
+    value: Num = None
+    kind: Annotated[DimensionKind, _enum(DimensionKind)] = 'other'
+    view_id: Text = ''
+    feature_ids: TextList = []
+    from_ref: Text = ''
+    to_ref: Text = ''
+    confidence: Confidence = 1.0
+    uncertainty: Text = ''
 
 
 class Derived(_Base):
-    value: str
-    basis: str = ''
-    assumption: str = ''
+    value: Text = ''
+    basis: Text = ''
+    assumption: Text = ''
 
 
 class Understanding(_Base):
-    part: Part
-    views: list[View]
-    features: list[Feature] = []
-    dimensions: list[Dimension]
-    relations: list[str] = []
-    derived: list[Derived] = []
-    unresolved: list[str] = []
+    part: Annotated[Part, BeforeValidator(lambda v: v if isinstance(v, dict) else {})] = Part()
+    views: Annotated[list[View], BeforeValidator(_objects)]
+    features: Annotated[list[Feature], BeforeValidator(_objects)] = []
+    dimensions: Annotated[list[Dimension], BeforeValidator(_objects)]
+    relations: TextList = []
+    derived: Annotated[list[Derived], BeforeValidator(_objects)] = []
+    unresolved: TextList = []
 
 
 # ---- General understanding (charts, diagrams, any image) -----------------
 
 class Element(_Base):
-    id: str
-    type: str = ''
-    label: str = ''
-    description: str = ''
-    confidence: float = 1.0
-    uncertainty: str = ''
+    id: Text = ''
+    type: Text = ''
+    label: Text = ''
+    description: Text = ''
+    confidence: Confidence = 1.0
+    uncertainty: Text = ''
 
 
 class DataPoint(_Base):
-    name: str
-    value: str = ''
-    unit: str = ''
-    source: str = ''
-    confidence: float = 1.0
-    uncertainty: str = ''
+    name: Text = ''
+    value: Text = ''
+    unit: Text = ''
+    source: Text = ''
+    confidence: Confidence = 1.0
+    uncertainty: Text = ''
 
 
 class GeneralUnderstanding(_Base):
-    title: str = ''
-    image_type: str = ''
-    summary: str
-    elements: list[Element] = []
-    texts: list[str] = []
-    data: list[DataPoint] = []
-    relations: list[str] = []
-    unresolved: list[str] = []
+    title: Text = ''
+    image_type: Text = ''
+    summary: Annotated[str, BeforeValidator(lambda v: v if isinstance(v, str) else _text(v))]
+    elements: Annotated[list[Element], BeforeValidator(_objects)] = []
+    texts: TextList = []
+    data: Annotated[list[DataPoint], BeforeValidator(_objects)] = []
+    relations: TextList = []
+    unresolved: TextList = []
 
 
 # ---- Geometry ------------------------------------------------------------

@@ -36,12 +36,12 @@ class UnderstandingTests(unittest.TestCase):
         self.assertEqual(u.unresolved, [])
         self.assertFalse(hasattr(u, 'extra_top'))
 
-    def test_understanding_rejects_unknown_view_type(self):
-        with self.assertRaises(ValidationError):
-            Understanding.model_validate({
-                'part': {'name': 'p'},
-                'views': [{'id': 'v1', 'type': 'isometric', 'name': 'x'}],
-                'dimensions': []})
+    def test_understanding_maps_unknown_view_type_to_other(self):
+        u = Understanding.model_validate({
+            'part': {'name': 'p'},
+            'views': [{'id': 'v1', 'type': 'isometric', 'name': 'x'}],
+            'dimensions': []})
+        self.assertEqual(u.views[0].type, 'other')
 
 
 class GeometryTests(unittest.TestCase):
@@ -139,3 +139,50 @@ class GeometryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TolerantUnderstandingTests(unittest.TestCase):
+    """Small slips in a model's reply are repaired; only the overall shape is strict."""
+
+    def test_slips_are_repaired(self):
+        from ragent_lab.vision.schema import Understanding
+        u = Understanding.model_validate({
+            'part': None,
+            'views': [{'id': 'v1', 'type': 'Isometric', 'name': None, 'bbox': [0, 0, 1]},
+                      {'id': 'v2', 'type': 'Section', 'bbox': ['0', 0.1, 0.5, '0.6']}, 'junk'],
+            'features': [{'id': 'f1', 'type': 'rectangle', 'center': ['10', 20], 'radius': 'R9.5',
+                          'points': [[0, 0], 'x', [1]], 'visible': 'false'}],
+            'dimensions': [{'id': 'd1', 'label': 'Ø20', 'value': 'Ø20', 'kind': 'Diameter',
+                            'feature_ids': 'f1', 'confidence': '90', 'uncertainty': None},
+                           {'id': 'd2', 'value': None, 'kind': 'chamfer', 'confidence': None}],
+            'relations': '同心', 'unresolved': None, 'derived': [{'value': 30}],
+        })
+        self.assertEqual(u.part.name, '')
+        self.assertEqual([(v.type, v.bbox) for v in u.views],
+                         [('other', None), ('section', [0.0, 0.1, 0.5, 0.6])])
+        f = u.features[0]
+        self.assertEqual((f.type, f.center, f.radius, f.points, f.visible),
+                         ('other', [10.0, 20.0], 9.5, [[0.0, 0.0]], False))
+        d1, d2 = u.dimensions
+        self.assertEqual((d1.value, d1.kind, d1.feature_ids, d1.confidence, d1.uncertainty),
+                         (20.0, 'diameter', ['f1'], 0.9, ''))
+        self.assertEqual((d2.value, d2.kind, d2.confidence), (None, 'other', 0.5))
+        self.assertEqual((u.relations, u.unresolved, u.derived[0].value), (['同心'], [], '30'))
+
+    def test_shape_stays_strict(self):
+        from pydantic import ValidationError
+        from ragent_lab.vision.schema import GeneralUnderstanding, Understanding
+        with self.assertRaises(ValidationError):
+            Understanding.model_validate({'summary': '一张图'})  # general reply, not a drawing
+        with self.assertRaises(ValidationError):
+            GeneralUnderstanding.model_validate({'views': [], 'dimensions': []})
+        g = GeneralUnderstanding.model_validate({'summary': ['a', 'b'], 'texts': 'x',
+                                                 'data': [{'name': 'Q3', 'value': 120}]})
+        self.assertEqual((g.summary, g.texts, g.data[0].value), ('a；b', ['x'], '120'))
+
+    def test_schema_sent_to_models_keeps_the_categories(self):
+        import json
+        from ragent_lab.vision.schema import Understanding, model_json_schema_for
+        text = json.dumps(model_json_schema_for(Understanding))
+        for word in ('"main"', '"hidden_line"', '"diameter"', '"dimensions"'):
+            self.assertIn(word, text)

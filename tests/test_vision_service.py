@@ -103,6 +103,20 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('vision call failed', logs.output[0])
         self.assertIn('kind=upstream', logs.output[0])
 
+    async def test_reply_wrapped_in_one_object_is_unwrapped(self):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake({'understanding': UNDERSTANDING})):
+            out = await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE)
+        self.assertEqual(out['understanding']['dimensions'][0]['label'], 'Ø19')
+
+    async def test_invalid_structure_is_logged_with_paths(self):
+        with mock.patch.object(service, 'aihubmix_chat_json', fake({'part': {}})), \
+                self.assertLogs('ragent_lab.vision.service', level='WARNING') as logs, \
+                self.assertRaises(ModelError):
+            await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE)
+        line = [l for l in logs.output if 'invalid structure' in l][0]
+        self.assertIn('structure=Understanding model=z-ai/glm-5v-turbo', line)
+        self.assertIn('views: missing', line)
+
     async def test_understand_invalid_structure_is_invalid_output(self):
         with mock.patch.object(service, 'aihubmix_chat_json', fake({'views': 'oops'})):
             with self.assertRaises(ModelError) as cm:

@@ -72,10 +72,22 @@ def _meta(call: CallResult, model: dict, gateway: str = 'catalog') -> dict:
     }
 
 
-def _validate(cls: type[BaseModel], content: dict) -> BaseModel:
+def _validate(cls: type[BaseModel], content: dict, model: dict | None = None) -> BaseModel:
     try:
         return cls.model_validate(content)
-    except ValidationError:
+    except ValidationError as exc:
+        # A reply wrapped in one extra object, e.g. {"understanding": {...}}.
+        inner = next(iter(content.values())) if isinstance(content, dict) and len(content) == 1 else None
+        if isinstance(inner, dict):
+            try:
+                return cls.model_validate(inner)
+            except ValidationError:
+                pass
+        # Where the reply broke the structure (paths and error types, not the content).
+        where = '; '.join(f"{'.'.join(map(str, e['loc']))}: {e['type']}"
+                          for e in exc.errors()[:8])
+        log.warning('vision output invalid structure=%s model=%s errors=%d %s', cls.__name__,
+                    (model or {}).get('id', '-'), exc.error_count(), where)
         raise ModelError('invalid_output', '输出不符合约定结构。') from None
 
 
@@ -99,7 +111,7 @@ async def understand(api_key: str, model_id: str | dict, image: PreparedImage,
     messages = [{'role': 'user', 'content': [_image_part(image), {'type': 'text', 'text': text}]}]
     call = await _call(gateway, api_key, model, messages, 'understanding',
                        model_json_schema_for(cls))
-    parsed = _validate(cls, call.content)
+    parsed = _validate(cls, call.content, model)
     return {'model': model['id'], 'model_name': model['name'], 'purpose': purpose, 'kind': kind,
             'understanding': parsed.model_dump(), 'meta': _meta(call, model, gateway)}
 
@@ -112,7 +124,7 @@ async def generate(api_key: str, model_id: str | dict, image: PreparedImage,
         _image_part(image), {'type': 'text', 'text': text}]}]
     call = await _call(gateway, api_key, model, messages, 'geometry',
                        model_json_schema_for(Geometry))
-    parsed = _validate(Geometry, call.content)
+    parsed = _validate(Geometry, call.content, model)
     return {'model': model['id'], 'model_name': model['name'],
             'geometry': parsed.model_dump(), 'meta': _meta(call, model, gateway)}
 
@@ -144,7 +156,7 @@ async def score(api_key: str, rubric: Rubric, understanding: dict,
     messages = [{'role': 'user', 'content': [{'type': 'text', 'text': text}]}]
     call = await _call(gateway, api_key, judge, messages, 'judge_result',
                        model_json_schema_for(JudgeResult))
-    parsed: JudgeResult = _validate(JudgeResult, call.content)
+    parsed: JudgeResult = _validate(JudgeResult, call.content, judge)
     expected = [i.id for i in rubric.items]
     got = [j.item_id for j in parsed.judgements]
     if len(got) != len(set(got)) or set(got) != set(expected):
@@ -188,7 +200,7 @@ async def consensus(api_key: str, results: list[dict], judge: dict = JUDGE_MODEL
     messages = [{'role': 'user', 'content': [{'type': 'text', 'text': text}]}]
     call = await _call(gateway, api_key, judge, messages, 'consensus_result',
                        model_json_schema_for(ConsensusResult))
-    parsed: ConsensusResult = _validate(ConsensusResult, call.content)
+    parsed: ConsensusResult = _validate(ConsensusResult, call.content, judge)
     for group in parsed.groups:
         for interp in group.interpretations:
             interp.models = [_letter(m, mapping) for m in interp.models]
