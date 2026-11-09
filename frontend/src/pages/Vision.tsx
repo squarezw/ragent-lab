@@ -424,7 +424,7 @@ export default function Vision() {
       <PageHeader
         eyebrow="EXPERIMENT 03 / VISION UNDERSTANDING"
         title="从看见，到真正理解。"
-        description="同一张图，按你选的用途交给多个视觉模型理解，对比打分或做一致性对照；工程图纸还能 1:1 还原为可编辑的 DXF。"
+        description="同一张图，按你选的用途交给多个视觉模型理解，对比打分或做一致性对照。"
         action={
           <a className="header-chip" href="#models">
             <span className="live-dot" />
