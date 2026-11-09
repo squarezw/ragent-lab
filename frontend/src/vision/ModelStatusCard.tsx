@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { ErrorMessage } from "../components/UI";
 import type { RunEntry, RunStatus } from "./state";
-import type { RunMeta } from "./types";
+import { isEngineering, type RunMeta } from "./types";
 
 const STATUS: Record<RunStatus, string> = {
   idle: "未开始",
@@ -141,6 +141,9 @@ export default function ModelStatusCard({
             </table>
           </div>
         </details>
+      )}
+      {run.understanding && !isEngineering(run.understanding) && (
+        <p className="vision-summary">{run.understanding.summary}</p>
       )}
       {run.understanding && (
         <details className="vision-details">

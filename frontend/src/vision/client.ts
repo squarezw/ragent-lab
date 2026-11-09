@@ -1,7 +1,7 @@
 import { api } from "../api";
 import type { BuiltinInfo } from "./modelSettings";
 import type {
-  Geometry, ImageRef, Job, Sample, UploadedImage, VisionModel,
+  Geometry, ImageRef, Job, Purpose, Sample, UploadedImage, VisionModel,
 } from "./types";
 
 export const JOB_GONE = "任务已失效，请重新运行。";
@@ -16,6 +16,7 @@ async function detailOf(response: Response): Promise<string> {
 
 export const listModels = () => api<VisionModel[]>("/vision/models");
 export const listSamples = () => api<Sample[]>("/vision/samples");
+export const listPurposes = () => api<Purpose[]>("/vision/purposes");
 export const listBuiltin = () => api<BuiltinInfo>("/vision/builtin");
 export const checkAccess = (access_code: string) =>
   api<{ ok: boolean }>("/vision/access", { access_code });

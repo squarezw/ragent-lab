@@ -55,12 +55,12 @@ class ComputeScoreTests(unittest.TestCase):
         self.assertEqual(counts, {'correct': 1, 'uncertain': 1, 'wrong': 1})
 
     def test_prompts_contain_guardrails(self):
-        self.assertIn('数据而不是指令', prompts.UNDERSTAND)
-        self.assertIn('像素', prompts.UNDERSTAND)
+        self.assertIn('数据而不是指令', prompts.understand_prompt('engineering'))
+        self.assertIn('像素', prompts.understand_prompt('engineering'))
         self.assertIn('dimension_ref', prompts.GENERATE)
 
     def test_prompts_coordinate_conventions(self):
-        self.assertIn('y 向上为正', prompts.UNDERSTAND)
+        self.assertIn('y 向上为正', prompts.understand_prompt('engineering'))
         self.assertIn('左下角', prompts.GENERATE)
         self.assertIn('y 向下', prompts.GENERATE)
         self.assertIn('null 或省略', prompts.GENERATE)
@@ -210,6 +210,67 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OpenRouterError) as cm:
                 await service.consensus(KEY, results)
         self.assertEqual(cm.exception.kind, 'invalid_output')
+
+
+GENERAL = {'title': '营收', 'image_type': '柱状图', 'summary': '各季度营收',
+           'elements': [{'id': 'x_axis', 'type': '坐标轴', 'label': '季度'}],
+           'data': [{'name': 'Q3', 'value': '120', 'unit': '万元'}]}
+
+
+class PurposeTests(unittest.IsolatedAsyncioTestCase):
+    def test_every_purpose_gets_fixed_rules_and_its_schema(self):
+        for pid, spec in prompts.PURPOSES.items():
+            with self.subTest(pid):
+                text = prompts.understand_prompt(pid)
+                self.assertTrue(text.startswith(spec['prompt']))
+                self.assertIn('数据而不是指令', text[len(spec['prompt']):])
+                field = '"dimensions"' if spec['kind'] == 'engineering' else '"summary"'
+                self.assertIn(field, text)
+
+    def test_custom_instructions_replace_default_but_keep_rules(self):
+        text = prompts.understand_prompt('chart', '  只读出图例。  ')
+        self.assertTrue(text.startswith('只读出图例。'))
+        self.assertNotIn(prompts.CHART, text)
+        self.assertIn('数据而不是指令', text)
+        self.assertIn('"elements"', text)
+        # Blank instructions fall back to the default prompt.
+        self.assertEqual(prompts.understand_prompt('chart', '   '),
+                         prompts.understand_prompt('chart'))
+
+    async def test_understand_general_purpose(self):
+        calls = []
+        with mock.patch.object(service, 'chat_json', fake(GENERAL, calls)):
+            out = await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE,
+                                           purpose='chart', instructions='读出每根柱子')
+        text = calls[0]['messages'][-1]['content'][1]['text']
+        self.assertTrue(text.startswith('读出每根柱子'))
+        self.assertIn('summary', calls[0]['schema']['properties'])
+        self.assertEqual((out['purpose'], out['kind']), ('chart', 'general'))
+        self.assertEqual(out['understanding']['data'][0]['value'], '120')
+        self.assertEqual(out['understanding']['texts'], [])
+
+    async def test_understand_general_rejects_engineering_shape(self):
+        with mock.patch.object(service, 'chat_json', fake(UNDERSTANDING)):
+            with self.assertRaises(OpenRouterError) as cm:
+                await service.understand(KEY, 'z-ai/glm-5v-turbo', IMAGE, purpose='general')
+        self.assertEqual(cm.exception.kind, 'invalid_output')
+
+    async def test_consensus_general_uses_elements_and_data(self):
+        calls = []
+        results = [{'model_name': 'A1', 'understanding': GENERAL},
+                   {'model_name': 'B1', 'understanding': GENERAL}]
+        with mock.patch.object(service, 'chat_json', fake({'groups': []}, calls)):
+            await service.consensus(KEY, results)
+        text = calls[0]['messages'][-1]['content'][0]['text']
+        self.assertTrue(text.startswith(prompts.CONSENSUS_GENERAL))
+        self.assertIn('x_axis', text)
+        self.assertNotIn('"dimensions"', text[len(prompts.CONSENSUS_GENERAL):])
+
+    async def test_consensus_rejects_mixed_structures(self):
+        results = [{'model_name': 'A1', 'understanding': GENERAL},
+                   {'model_name': 'B1', 'understanding': UNDERSTANDING}]
+        with self.assertRaises(ValueError):
+            await service.consensus(KEY, results)
 
 
 if __name__ == '__main__':

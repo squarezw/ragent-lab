@@ -3,7 +3,7 @@ import { Download, GitCompareArrows, Scale, Upload } from "lucide-react";
 import { ErrorMessage, Panel, RunButton } from "../components/UI";
 import ModelStatusCard from "./ModelStatusCard";
 import type { ConsensusEntry, RunEntry } from "./state";
-import type { ConsensusResult, Gateway, VisionModel } from "./types";
+import type { ConsensusResult, Gateway, PurposeKind, VisionModel } from "./types";
 
 export function formatPrice(
   price: VisionModel["price"],
@@ -63,6 +63,8 @@ export default function StepUnderstand({
   selected,
   runs,
   scorable,
+  kind = "engineering",
+  purposeName = "",
   consensus,
   judge,
   onJudge,
@@ -81,6 +83,8 @@ export default function StepUnderstand({
   selected: string[];
   runs: Record<string, RunEntry>;
   scorable: boolean;
+  kind?: PurposeKind;
+  purposeName?: string;
   consensus?: ConsensusEntry;
   judge: string;
   onJudge: (model: string) => void;
@@ -210,8 +214,9 @@ export default function StepUnderstand({
               <h2>
                 理解结果 <span>{String(cards.length).padStart(2, "0")}</span>
               </h2>
+              {purposeName && <p className="field-help">用途：{purposeName}</p>}
             </div>
-            {done.length > 0 && (
+            {done.length > 0 && kind === "engineering" && (
               <button type="button" className="text-button" onClick={onNext}>
                 下一步：还原 →
               </button>
@@ -260,7 +265,7 @@ export default function StepUnderstand({
                 <thead>
                   <tr>
                     <th>条目</th>
-                    <th>视图</th>
+                    <th>{kind === "engineering" ? "视图" : "类别"}</th>
                     <th>解释</th>
                     <th>模型</th>
                   </tr>

@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from ..vision import netguard, render, service
+from ..vision import netguard, prompts, render, service
 from ..vision.builtin import builtins
 from ..vision.images import (MAX_UPLOAD_BYTES, ImageRejected, PreparedImage, get_sample,
                              images, load_samples, prepare_image)
@@ -18,7 +18,7 @@ from ..vision.openrouter import OpenRouterError
 from ..vision.jobs import public, runner
 from ..vision.registry import (JUDGE_MODEL, VISION_MODELS, gateways_of, get_model, judge_model,
                                model_prices)
-from ..vision.schema import Geometry, Understanding
+from ..vision.schema import GeneralUnderstanding, Geometry, Understanding
 
 router = APIRouter(prefix='/api/vision')
 
@@ -72,25 +72,35 @@ class ImageRef(_Body):
     id: str
 
 
+PurposeId = Literal[tuple(prompts.PURPOSES)]
+# Either structure; they share no required fields, so validation picks the right one.
+AnyUnderstanding = Union[Understanding, GeneralUnderstanding]
+
+
 class UnderstandBody(_Keyed):
     image: ImageRef
     model: str | ModelRef
+    purpose: PurposeId = prompts.DEFAULT_PURPOSE
+    # The visitor's own instructions; replaces the purpose's default prompt.
+    prompt: str | None = Field(default=None, max_length=prompts.MAX_PROMPT_CHARS)
 
 
-class GenerateBody(UnderstandBody):
+class GenerateBody(_Keyed):
+    image: ImageRef
+    model: str | ModelRef
     understanding: Understanding
 
 
 class ScoreBody(_Keyed):
     sample_id: str
-    understanding: Understanding
+    understanding: AnyUnderstanding
     judge_model: str | None = None
     judge: ModelRef | None = None
 
 
 class ConsensusItem(_Body):
     model_name: str
-    understanding: Understanding
+    understanding: AnyUnderstanding
 
 
 class ConsensusBody(_Keyed):
@@ -218,6 +228,13 @@ async def models():
              'price': prices.get(m['id']), 'gateways': gateways_of(m)} for m in VISION_MODELS]
 
 
+@router.get('/purposes')
+def purposes():
+    """Built-in understanding purposes with their default (editable) prompts."""
+    return [{'id': pid, 'name': p['name'], 'kind': p['kind'], 'description': p['description'],
+             'prompt': p['prompt']} for pid, p in prompts.PURPOSES.items()]
+
+
 @router.get('/judge')
 def judge():
     return {'id': JUDGE_MODEL['id'], 'name': JUDGE_MODEL['name']}
@@ -246,7 +263,8 @@ def check_access(body: AccessBody, request: Request):
 @router.get('/samples')
 def samples():
     return [{'id': s.id, 'name': s.name,
-             'scorable': bool(s.rubric and s.rubric.rubric_status == 'approved')}
+             'scorable': bool(s.rubric and s.rubric.rubric_status == 'approved'),
+             'kind': s.rubric.kind if s.rubric else 'engineering'}
             for s in load_samples()]
 
 
@@ -281,9 +299,10 @@ async def upload_image(file: UploadFile = File(...)):
 async def understand(body: UnderstandBody, request: Request):
     image = _resolve_image(body.image)
     model, gateway, key = await _resolve(body.model, body, request)
+    purpose, instructions = body.purpose, body.prompt
 
     async def factory():
-        return await service.understand(key, model, image, gateway)
+        return await service.understand(key, model, image, gateway, purpose, instructions)
     return _job('understand', model['name'], factory)
 
 
@@ -293,6 +312,8 @@ async def score(body: ScoreBody, request: Request):
     if sample is None or sample.rubric is None or sample.rubric.rubric_status != 'approved' \
             or not sample.rubric.items:
         raise HTTPException(422, '该样例没有可用的评分细则')
+    if service.kind_of(body.understanding.model_dump()) != sample.rubric.kind:
+        raise HTTPException(422, '这份理解的用途与该样例的评分细则不一致，无法打分')
     judge, gateway, key = await _resolve(body.judge or body.judge_model, body, request, judge=True)
     rubric, understanding = sample.rubric, body.understanding.model_dump()
 
@@ -303,6 +324,8 @@ async def score(body: ScoreBody, request: Request):
 
 @router.post('/consensus')
 async def consensus(body: ConsensusBody, request: Request):
+    if len({type(r.understanding) for r in body.results}) != 1:
+        raise HTTPException(422, '只能对照同一用途的理解结果')
     judge, gateway, key = await _resolve(body.judge or body.judge_model, body, request, judge=True)
     results = [{'model_name': r.model_name, 'understanding': r.understanding.model_dump()}
                for r in body.results]

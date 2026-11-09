@@ -40,10 +40,12 @@ def _write_sample(root: Path, sid: str, status: str) -> None:
 SEEN_KEYS: list[str] = []
 
 
-async def _fake_understand(api_key, model_id, image, gateway):
+async def _fake_understand(api_key, model_id, image, gateway, purpose='engineering',
+                           instructions=None):
     SEEN_KEYS.append(api_key)
     model = model_id if isinstance(model_id, dict) else {'id': model_id, 'name': 'X'}
     return {'model': model['id'], 'model_name': model['name'], 'understanding': UNDERSTANDING,
+            'purpose': purpose, 'instructions': instructions,
             'meta': {'gateway': gateway, 'endpoint': (model.get('endpoint') or {}).get('label')}}
 
 
@@ -275,6 +277,66 @@ class VisionAPITests(unittest.TestCase):
                 'file': ('big.png', b'0' * (16 * 1024 * 1024), 'image/png')})
             self.assertEqual(r.status_code, 413)
             r = client.post('/api/vision/images', files={'file': ('x.png', b'not an image', 'image/png')})
+            self.assertEqual(r.status_code, 422)
+
+
+GENERAL = {'summary': '一张流程图', 'elements': [{'id': 'n1', 'type': '步骤', 'label': '开始'}]}
+
+
+class PurposeAPITests(unittest.TestCase):
+    _wait = VisionAPITests._wait
+
+    def setUp(self):
+        VisionAPITests.setUp(self)
+
+    def _understand(self, client, **extra):
+        return client.post('/api/vision/understand', json={
+            'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'api_key': KEY, **extra})
+
+    def test_lists_purposes_with_default_prompts(self):
+        with TestClient(app) as client:
+            out = client.get('/api/vision/purposes').json()
+        self.assertEqual([p['id'] for p in out], ['engineering', 'chart', 'diagram', 'general'])
+        self.assertEqual(out[0]['kind'], 'engineering')
+        self.assertTrue(all(p['prompt'] and p['name'] and p['description'] for p in out))
+        self.assertEqual({p['kind'] for p in out[1:]}, {'general'})
+
+    def test_purpose_and_prompt_reach_the_service(self):
+        with TestClient(app) as client:
+            job, _ = self._wait(client, self._understand(client).json()['job_id'])
+            self.assertEqual((job['result']['purpose'],
+                              job['result']['instructions']), ('engineering', None))
+            r = self._understand(client, purpose='diagram', prompt='只列出节点')
+            job, _ = self._wait(client, r.json()['job_id'])
+            self.assertEqual((job['result']['purpose'],
+                              job['result']['instructions']), ('diagram', '只列出节点'))
+
+    def test_bad_purpose_or_long_prompt_rejected(self):
+        with TestClient(app) as client:
+            self.assertEqual(self._understand(client, purpose='poetry').status_code, 422)
+            self.assertEqual(self._understand(client, prompt='x' * 8001).status_code, 422)
+            self.assertEqual(self._understand(client, prompt='x' * 8000).status_code, 200)
+
+    def test_score_and_consensus_accept_general_results(self):
+        with TestClient(app) as client:
+            samples = {s['id']: s for s in client.get('/api/vision/samples').json()}
+            self.assertEqual(samples['ok']['kind'], 'engineering')
+            # The sample's rubric grades engineering output; a general result cannot be scored.
+            r = client.post('/api/vision/score', json={
+                'sample_id': 'ok', 'understanding': GENERAL, 'api_key': KEY})
+            self.assertEqual(r.status_code, 422)
+            self.assertIn('用途', r.json()['detail'])
+            two = [{'model_name': 'A', 'understanding': GENERAL},
+                   {'model_name': 'B', 'understanding': GENERAL}]
+            r = client.post('/api/vision/consensus', json={'results': two, 'api_key': KEY})
+            self.assertEqual(r.status_code, 200, r.text)
+            mixed = [two[0], {'model_name': 'B', 'understanding': UNDERSTANDING}]
+            r = client.post('/api/vision/consensus', json={'results': mixed, 'api_key': KEY})
+            self.assertEqual(r.status_code, 422)
+            # Redraw stays engineering-only.
+            r = client.post('/api/vision/generate', json={
+                'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL,
+                'understanding': GENERAL, 'api_key': KEY})
             self.assertEqual(r.status_code, 422)
 
 
