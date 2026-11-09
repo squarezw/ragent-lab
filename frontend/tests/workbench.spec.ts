@@ -373,6 +373,13 @@ test("vision: understand two models, score, redraw and download", async ({
   await expect(page.getByText("价格未知")).toBeVisible();
   await cards.first().getByText("逐项评分").click();
   await expect(cards.first().locator("table")).toContainText("外径 Ø120");
+  await cards.first().getByRole("button", { name: "查看完整 JSON" }).click();
+  const viewer = page.getByRole("dialog", { name: /理解结果/ });
+  await expect(viewer).toBeVisible();
+  await expect(viewer.locator(".json-key").first()).toHaveText('"part"');
+  await expect(viewer).toContainText('"drawing_number": "D-1"');
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
   await page.getByRole("button", { name: "③ 还原" }).click();
   await expect(page.getByLabel("理解来源")).toHaveValue("catalog:vendor/model-a");
   await expect(page.getByLabel("生成模型")).toHaveValue("catalog:vendor/model-a");

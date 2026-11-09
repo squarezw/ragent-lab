@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { Download, GitCompareArrows, Scale, Upload } from "lucide-react";
+import JsonViewer from "../components/JsonViewer";
 import { ErrorMessage, Panel, RunButton } from "../components/UI";
 import ModelStatusCard from "./ModelStatusCard";
 import type { ConsensusEntry, RunEntry } from "./state";
@@ -258,6 +259,14 @@ export default function StepUnderstand({
           )}
           {consensus?.status === "failed" && (
             <ErrorMessage message={consensus.error ?? "生成失败"} />
+          )}
+          {consensus?.status === "done" && consensus.result && (
+            <JsonViewer
+              title="一致性对照"
+              data={consensus.result}
+              filename="consensus"
+              label="对照 JSON"
+            />
           )}
           {consensus?.status === "done" && consensus.result && (
             <div className="vision-table-wrap">

@@ -5,6 +5,7 @@ import {
   RotateCcw,
   XCircle,
 } from "lucide-react";
+import JsonViewer from "../components/JsonViewer";
 import { ErrorMessage } from "../components/UI";
 import type { RunEntry, RunStatus } from "./state";
 import { isEngineering, type RunMeta } from "./types";
@@ -146,12 +147,11 @@ export default function ModelStatusCard({
         <p className="vision-summary">{run.understanding.summary}</p>
       )}
       {run.understanding && (
-        <details className="vision-details">
-          <summary>完整 JSON</summary>
-          <pre className="vision-json">
-            {JSON.stringify(run.understanding, null, 2)}
-          </pre>
-        </details>
+        <JsonViewer
+          title={`${run.model_name} · 理解结果`}
+          data={run.understanding}
+          filename={`understanding-${run.model_name}`}
+        />
       )}
     </article>
   );
