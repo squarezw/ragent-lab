@@ -1,12 +1,12 @@
-"""AIHubMix: one key for many model families, called through the generic compat client.
+"""AIHubMix: serves every catalog model, called through the generic compat client.
 
-Routes live in registry.AIHUBMIX: Claude uses the native Anthropic Messages endpoint
-(x-api-key), everything else OpenAI Chat Completions.
+Routes live in registry.VISION_MODELS ('route'): Claude uses the native Anthropic Messages
+endpoint (x-api-key), everything else OpenAI Chat Completions.
 """
 from __future__ import annotations
 
 from .compat import call_endpoint
-from .openrouter import CallResult, OpenRouterError
+from .calls import CallResult, ModelError
 
 BASE_URL = 'https://aihubmix.com'
 PATHS = {'chat': '/v1/chat/completions', 'anthropic': '/v1/messages'}
@@ -22,9 +22,9 @@ def endpoint(route: dict) -> dict:
 
 async def chat_json(api_key: str, model: dict, messages: list[dict],
                     schema_name: str, schema: dict) -> CallResult:
-    route = model.get('aihubmix')
+    route = model.get('route')
     if not route:
-        raise OpenRouterError('upstream', f'{model["name"]} 不支持 AIHubMix。')
+        raise ModelError('upstream', f'{model["name"]} 没有可用的调用方式。')
     result = await call_endpoint(api_key, endpoint(route), model, messages, schema_name, schema)
     result.provider = 'AIHubMix'
     return result

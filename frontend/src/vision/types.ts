@@ -1,13 +1,5 @@
 // Mirrors the backend JSON (src/ragent_lab/api/vision.py, vision/schema.py, service.py).
 
-export type Gateway = "openrouter" | "kie" | "aihubmix";
-
-export const GATEWAY_NAMES: Record<Gateway, string> = {
-  openrouter: "OpenRouter",
-  kie: "Kie.ai",
-  aihubmix: "AIHubMix",
-};
-
 export type VisionModel = {
   id: string;
   name: string;
@@ -18,9 +10,7 @@ export type VisionModel = {
     temperature: number | null;
     reasoning: Record<string, unknown> | null;
   };
-  price: { prompt: string | null; completion: string | null } | null;
-  gateways?: Gateway[];
-  // Set for options built from the model settings: where the call goes (platform badge).
+  // Set for options built from the model settings (only custom models get one).
   tag?: string;
 };
 
@@ -179,7 +169,7 @@ export type Judgement = {
 };
 
 export type RunMeta = {
-  gateway?: Gateway;
+  gateway?: string;
   credits?: number | null;
   model: string;
   provider: string | null;

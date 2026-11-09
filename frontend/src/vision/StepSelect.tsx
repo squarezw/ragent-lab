@@ -236,7 +236,7 @@ export default function StepSelect({
             </div>
             {models.length > 0 && (
               <p className="field-help">
-                {models.map((m) => `${m.name}（${m.badge}）`).join("、")}
+                {models.map((m) => (m.badge ? `${m.name}（${m.badge}）` : m.name)).join("、")}
               </p>
             )}
             {pending.length > 0 && (
@@ -244,7 +244,7 @@ export default function StepSelect({
             )}
             {!models.length && (
               <p className="field-help">
-                在「模型设置」里填写 AIHubMix、OpenRouter 或 Kie.ai 的 Key、内置模型的访问码，或添加自己的模型接口。
+                在「模型设置」里填写访问码，或添加自己的模型接口。
               </p>
             )}
           </div>

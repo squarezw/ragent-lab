@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  exportState, gatewayStorage, importState, initialState, keyStorage, reducer, type VisionState,
+  exportState, importState, initialState, reducer, type VisionState,
 } from "./state";
 
 const populated: VisionState = {
@@ -60,51 +60,5 @@ describe("vision state", () => {
     let s = reducer(initialState, { type: "runUpdate", model: "m", patch: { model_name: "M", status: "running" } });
     s = reducer(s, { type: "runUpdate", model: "m", patch: { status: "done" } });
     expect(s.runs.m).toMatchObject({ model_name: "M", status: "done" });
-  });
-});
-
-describe("keyStorage", () => {
-  const store = new Map<string, string>();
-  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
-  beforeEach(() => {
-    store.clear();
-    Object.defineProperty(globalThis, "localStorage", {
-      configurable: true,
-      value: {
-        getItem: (k: string) => store.get(k) ?? null,
-        setItem: (k: string, v: string) => void store.set(k, v),
-        removeItem: (k: string) => void store.delete(k),
-      },
-    });
-  });
-  afterEach(() => {
-    if (original) Object.defineProperty(globalThis, "localStorage", original);
-    else delete (globalThis as { localStorage?: unknown }).localStorage;
-  });
-
-  it("does not persist when remember is false", () => {
-    keyStorage.save("sk-test", false);
-    expect(store.has("vision-openrouter-key")).toBe(false);
-    expect(keyStorage.load()).toBe("");
-  });
-
-  it("persists when remember is true and removes on later opt-out", () => {
-    keyStorage.save("sk-test", true);
-    expect(keyStorage.load()).toBe("sk-test");
-    keyStorage.save("sk-test", false);
-    expect(keyStorage.load()).toBe("");
-  });
-
-  it("keeps a separate key per gateway and remembers the gateway", () => {
-    keyStorage.save("sk-or", true, "openrouter");
-    keyStorage.save("kie-key", true, "kie");
-    expect(keyStorage.load("openrouter")).toBe("sk-or");
-    expect(keyStorage.load("kie")).toBe("kie-key");
-    keyStorage.save("kie-key", false, "kie");
-    expect(keyStorage.load("kie")).toBe("");
-    expect(keyStorage.load("openrouter")).toBe("sk-or");
-    expect(gatewayStorage.load()).toBe("openrouter");
-    gatewayStorage.save("kie");
-    expect(gatewayStorage.load()).toBe("kie");
   });
 });

@@ -9,7 +9,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from ragent_lab.vision import jobs
 from ragent_lab.vision.jobs import JobRunner, public
-from ragent_lab.vision.openrouter import OpenRouterError
+from ragent_lab.vision.calls import ModelError
 
 
 async def wait_done(runner, job, limit=5.0):
@@ -45,7 +45,7 @@ class JobRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         async def bad():
             _ = secret  # captured in closure
-            raise OpenRouterError('auth', 'Key 无效或无权限。')
+            raise ModelError('auth', 'Key 无效或无权限。')
 
         async def good():
             return {'v': 1}

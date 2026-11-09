@@ -68,7 +68,7 @@ test("mobile navigation and vision workbench have no horizontal overflow", async
   ).toBe(true);
 });
 
-// ---- vision fixtures: every /api/vision/** call is mocked, never the real OpenRouter ----
+// ---- vision fixtures: every /api/vision/** call is mocked, never a real model ----
 
 const PNG_1x1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -82,8 +82,6 @@ const MODELS = [
     family: "a",
     notes: "",
     params: { max_tokens: 8000, temperature: 0, reasoning: null },
-    price: { prompt: "0.000003", completion: "0.000015" },
-    gateways: ["openrouter", "kie"],
   },
   {
     id: "vendor/model-b",
@@ -91,8 +89,6 @@ const MODELS = [
     family: "b",
     notes: "",
     params: { max_tokens: 8000, temperature: 0, reasoning: null },
-    price: null,
-    gateways: ["openrouter"],
   },
 ];
 const META = {
@@ -156,7 +152,6 @@ const modelOf = (m: { id?: string; name?: string } | string | undefined) =>
 type Job = {
   kind: string;
   model?: string;
-  gateway?: string;
   purpose?: string;
   polls: number;
   fail?: string;
@@ -195,9 +190,7 @@ async function mockVision(
           understanding:
             (job.purpose ?? "engineering") === "engineering" ? UNDERSTANDING : GENERAL,
           meta:
-            job.gateway === "kie"
-              ? { ...META, gateway: "kie", cost: null, credits: 0.28 }
-              : META,
+            META,
         };
       case "score":
         return {
@@ -262,7 +255,7 @@ async function mockVision(
     if (path === "/models") return route.fulfill({ json: MODELS });
     if (path === "/builtin")
       return route.fulfill({
-        json: opts.builtin ?? { enabled: false, per_hour: 60, models: [] },
+        json: opts.builtin ?? { enabled: true, per_hour: 60, models: [] },
       });
     if (path === "/samples") return route.fulfill({ json: opts.samples });
     if (path === "/purposes") return route.fulfill({ json: PURPOSES });
@@ -293,10 +286,9 @@ async function mockVision(
         addJob({
           kind: "understand",
           model: id,
-          gateway: body.model?.gateway,
           purpose: body.purpose,
           hang: opts.hang,
-          fail: fail ? "OpenRouter Key 无效或已撤销。" : undefined,
+          fail: fail ? "Claude 暂时不可用：上游返回 503。" : undefined,
         }),
       );
     }
@@ -360,7 +352,7 @@ async function backToVision(page: Page) {
 
 async function startUnderstanding(page: Page) {
   await openSettings(page);
-  await page.getByLabel("OpenRouter Key").fill("fixture-secret");
+  await page.locator("#access-code").fill("fixture-code");
   await backToVision(page);
   await page.getByRole("button", { name: "下一步：理解对比" }).click();
   await page.getByRole("button", { name: "开始理解" }).click();
@@ -379,12 +371,8 @@ test("vision: understand two models, score, redraw and download", async ({
   );
   await startUnderstanding(page);
   const scoreBody = (await scoreReq).postDataJSON();
-  expect(scoreBody.judge).toEqual({
-    source: "catalog",
-    id: "vendor/model-a",
-    gateway: "openrouter",
-    api_key: "fixture-secret",
-  });
+  expect(scoreBody.judge).toEqual({ source: "catalog", id: "vendor/model-a" });
+  expect(scoreBody.access_code).toBe("fixture-code");
   // The drawing picked before visiting the settings page is still selected.
   await expect(page.getByText("理解结果")).toBeVisible();
   const cards = page.locator(".vision-model-card");
@@ -431,7 +419,7 @@ test("vision: one model fails without affecting others and can retry", async ({
   await startUnderstanding(page);
   const bad = page.locator(".vision-model-card", { hasText: "Model B" });
   const good = page.locator(".vision-model-card", { hasText: "Model A" });
-  await expect(bad).toContainText("OpenRouter Key 无效或已撤销。", {
+  await expect(bad).toContainText("Claude 暂时不可用：上游返回 503。", {
     timeout: 20000,
   });
   await expect(good).toContainText("已完成");
@@ -479,44 +467,6 @@ test("vision: uploaded drawing shows consensus instead of score", async ({
   ).toBeGreaterThanOrEqual(1);
 });
 
-test("vision: settings pick a platform per model and keys can stay unsaved", async ({
-  page,
-}) => {
-  await mockVision(page, { samples: [SAMPLE] });
-  const bodies: { model: Record<string, string> }[] = [];
-  page.on("request", (r) => {
-    if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
-      bodies.push(r.postDataJSON());
-  });
-  await page.goto("/#vision");
-  await page.getByRole("button", { name: /法兰盘/ }).click();
-  await openSettings(page);
-  // Model B is only on OpenRouter, so its platform can't be changed.
-  await expect(page.getByLabel("Model B 调用平台")).toBeDisabled();
-  await page.getByLabel("Model A 调用平台").selectOption("kie");
-  await page.getByLabel("Kie.ai Key").fill("kie-fixture-secret");
-  await page.getByLabel("在本浏览器保存 Key（含访问码和自定义模型的 Key）").uncheck();
-  await backToVision(page);
-  await expect(page.getByText("已就绪 1 个模型")).toBeVisible();
-  await expect(page.getByText(/Model B：未填写 OpenRouter Key/)).toBeVisible();
-  await page.getByRole("button", { name: "下一步：理解对比" }).click();
-  await expect(page.locator(".vision-model-option small")).toHaveText("Kie.ai");
-  await page.getByRole("button", { name: "开始理解" }).click();
-  const card = page.locator(".vision-model-card", { hasText: "Model A" });
-  await expect(card).toContainText("已完成", { timeout: 20000 });
-  await expect(card).not.toContainText("积分");
-  expect(bodies).toHaveLength(1);
-  expect(bodies[0].model).toEqual({
-    source: "catalog",
-    id: "vendor/model-a",
-    gateway: "kie",
-    api_key: "kie-fixture-secret",
-  });
-  const stored = await page.evaluate(() => JSON.stringify(localStorage));
-  expect(stored).toContain("lab-model-settings");
-  expect(stored).not.toContain("kie-fixture-secret");
-});
-
 test("vision: a custom model from a platform preset runs with its own key", async ({
   page,
 }) => {
@@ -528,7 +478,7 @@ test("vision: a custom model from a platform preset runs with its own key", asyn
   });
   await page.goto("/#models");
   await page.getByRole("button", { name: "添加模型" }).click();
-  await page.getByLabel("从平台预设开始").selectOption("deepseek");
+  await page.getByLabel("从预设开始").selectOption("deepseek");
   await expect(page.getByLabel("接口地址")).toHaveValue(
     "https://api.deepseek.com/chat/completions",
   );
@@ -677,10 +627,12 @@ test("vision: running tasks can be cancelled one by one or all at once", async (
   await expect(page.locator(".vision-model-card", { hasText: "已取消" })).toHaveCount(2);
 });
 
-test("vision: the server's OpenRouter key is used with the access code", async ({ page }) => {
+test("vision: one access code unlocks every model, nothing names a platform", async ({
+  page,
+}) => {
   await mockVision(page, {
     samples: [SAMPLE],
-    builtin: { enabled: true, per_hour: 60, models: [], platforms: ["openrouter"] },
+    builtin: { enabled: true, per_hour: 60, models: [{ id: "ds", name: "DeepSeek 快速", notes: "约 10 秒" }] },
   });
   const bodies: Record<string, unknown>[] = [];
   page.on("request", (r) => {
@@ -688,21 +640,28 @@ test("vision: the server's OpenRouter key is used with the access code", async (
       bodies.push(r.postDataJSON());
   });
   await page.goto("/#models");
-  await expect(page.getByText(/服务器已提供 OpenRouter Key/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "模型设置" })).toBeVisible();
+  for (const name of ["Model A", "Model B", "DeepSeek 快速"])
+    await expect(page.getByLabel(`启用 ${name}`)).toBeChecked();
+  await page.getByLabel("启用 Model B").uncheck();
   await page.locator("#access-code").fill("the-code");
+  await page.getByLabel("在本浏览器记住访问码（和自定义模型的 Key）").uncheck();
+  await expect(page.locator(".models-page")).not.toContainText(/OpenRouter|Kie\.ai|AIHubMix|调用平台/);
   await page.getByRole("link", { name: /去图像理解/ }).click();
   await page.getByRole("button", { name: /法兰盘/ }).click();
   await expect(page.getByText("已就绪 2 个模型")).toBeVisible();
   await page.getByRole("button", { name: "下一步：理解对比" }).click();
-  await expect(page.locator(".vision-model-option small").first()).toHaveText(
-    "OpenRouter · 服务器 Key",
-  );
+  await expect(page.locator(".vision-model-option small")).toHaveCount(0);
   await page.getByRole("button", { name: "开始理解" }).click();
   await expect(
     page.locator(".vision-model-card", { hasText: "已完成" }),
   ).toHaveCount(2, { timeout: 20000 });
-  expect(bodies[0]).toMatchObject({
-    model: { source: "catalog", gateway: "openrouter", api_key: "" },
-    access_code: "the-code",
-  });
+  expect(bodies.map((b) => b.model)).toEqual([
+    { source: "catalog", id: "vendor/model-a" },
+    { source: "builtin", id: "ds" },
+  ]);
+  expect(bodies[0].access_code).toBe("the-code");
+  const stored = await page.evaluate(() => JSON.stringify(localStorage));
+  expect(stored).toContain("lab-model-settings");
+  expect(stored).not.toContain("the-code");
 });

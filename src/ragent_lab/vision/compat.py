@@ -1,20 +1,20 @@
 """Streaming JSON client for any endpoint speaking one of three wire formats.
 
-Used for Kie.ai, server built-in models and visitor-defined custom models. An endpoint is a
+Used for every model call: the catalog (AIHubMix), server built-ins and custom models. An endpoint is a
 dict:
 
     api        'chat' (OpenAI Chat Completions) | 'responses' (OpenAI Responses)
                | 'anthropic' (Anthropic Messages)
     url        full https URL of the endpoint
-    model      model name sent in the body (None to omit it, e.g. Kie.ai's Gemini route)
+    model      model name sent in the body (None to omit it, when the URL names the model)
     json       'schema' (send the JSON schema) | 'object' (chat json_object mode)
                | 'prompt' (only ask for JSON in the prompt)
     auth       'bearer' (Authorization: Bearer) | 'x-api-key' (Anthropic's own API)
-    label      name shown in error messages, e.g. 'Kie.ai' or 'api.deepseek.com'
+    label      name shown in error messages, e.g. 'AIHubMix' or 'api.deepseek.com'
     extra      optional dict merged into the request body
     public_only  re-check before each request that url is public https (visitor URLs)
 
-Callers pass OpenAI chat-style messages; the result is the same CallResult as OpenRouter's.
+Callers pass OpenAI chat-style messages; every format comes back as the same CallResult.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ import time
 import httpx
 
 from . import netguard
-from .openrouter import CallResult, OpenRouterError, extract_json
+from .calls import CallResult, ModelError, extract_json
 from .schema import lean_schema
 
 log = logging.getLogger(__name__)
@@ -188,7 +188,7 @@ def _error_detail(data) -> str:
 
 
 def _status_error(ep: dict, code: int, detail: str, api_key: str,
-                  model_id: str) -> OpenRouterError:
+                  model_id: str) -> ModelError:
     label = ep['label']
     detail = _redact(detail.strip(), api_key)
     kind, msg = {
@@ -197,11 +197,11 @@ def _status_error(ep: dict, code: int, detail: str, api_key: str,
         429: ('rate_limit', f'请求过于频繁或被 {label} 限流，请稍后重试'),
     }.get(code, ('upstream', f'{label} 拒绝了请求（{code}）'))
     log.warning('%s %s code %s: %s', label, model_id, code, detail or '-')
-    return OpenRouterError(kind, f'{msg}：{detail}' if detail else f'{msg}。')
+    return ModelError(kind, f'{msg}：{detail}' if detail else f'{msg}。')
 
 
 def _envelope_code(data: dict) -> int | None:
-    """Kie.ai may answer HTTP 200 with {"code": 4xx, "msg": ...} instead of a result."""
+    """Some platforms answer HTTP 200 with {"code": 4xx, "msg": ...} instead of a result."""
     code = data.get('code')
     if isinstance(code, int) and code != 200 and not any(
             k in data for k in ('choices', 'output', 'content')):
@@ -214,7 +214,7 @@ def _envelope_code(data: dict) -> int | None:
 class _Transient(Exception):
     """A failure worth retrying (overload, gateway timeout, stream cut off)."""
 
-    def __init__(self, error: OpenRouterError):
+    def __init__(self, error: ModelError):
         super().__init__(error.message)
         self.error = error
 
@@ -234,7 +234,7 @@ class _Stream:
         self.final: dict | None = None  # Responses API: the response.completed payload
 
     def _broken(self, message) -> _Transient:
-        return _Transient(OpenRouterError('upstream', f'{self.label} 上游中断：{message}'))
+        return _Transient(ModelError('upstream', f'{self.label} 上游中断：{message}'))
 
     def feed(self, ev: dict) -> None:
         if 'credits_consumed' in ev:
@@ -278,7 +278,7 @@ class _Stream:
     def result(self) -> dict:
         finished = self.done or (self.api == 'chat' and self.finish is not None)
         if not finished:
-            raise _Transient(OpenRouterError('upstream', f'{self.label} 流式响应中途断开。'))
+            raise _Transient(ModelError('upstream', f'{self.label} 流式响应中途断开。'))
         if self.api == 'responses':
             data = dict(self.final or {})
             data['output'] = [{'type': 'message',
@@ -333,16 +333,16 @@ async def _attempt(ep: dict, body: dict, api_key: str, model_id: str) -> dict:
                     return await _read_sse(resp, ep)
                 raw = await resp.aread()
     except httpx.TimeoutException:
-        raise OpenRouterError('timeout', '模型调用超时。') from None
+        raise ModelError('timeout', '模型调用超时。') from None
     except httpx.HTTPError as exc:
-        raise _Transient(OpenRouterError('upstream', f'网络错误：{type(exc).__name__}。')) from None
-    # A plain JSON answer: a server that ignored stream, or Kie.ai's {"code", "msg"} envelope.
+        raise _Transient(ModelError('upstream', f'网络错误：{type(exc).__name__}。')) from None
+    # A plain JSON answer: a server that ignored stream, or a {"code", "msg"} error envelope.
     try:
         data = json.loads(raw)
     except ValueError:
-        raise OpenRouterError('upstream', f'{label} 返回了无法识别的响应。') from None
+        raise ModelError('upstream', f'{label} 返回了无法识别的响应。') from None
     if not isinstance(data, dict):
-        raise OpenRouterError('upstream', f'{label} 返回了无法识别的响应。')
+        raise ModelError('upstream', f'{label} 返回了无法识别的响应。')
     code = _envelope_code(data)
     if code is not None:
         err = _status_error(ep, code, _error_detail(data), api_key, model_id)
@@ -365,13 +365,13 @@ async def call_endpoint(api_key: str, ep: dict, model: dict, messages: list[dict
             try:
                 await asyncio.to_thread(netguard.check_public_https, ep['url'])
             except netguard.UnsafeURL as exc:
-                raise OpenRouterError('upstream', str(exc)) from None
+                raise ModelError('upstream', str(exc)) from None
         try:
             data = await _attempt(ep, body, api_key, model['id'])
             break
         except _Transient as exc:
             if n == attempts - 1:
-                raise OpenRouterError(exc.error.kind,
+                raise ModelError(exc.error.kind,
                                       f'{exc.error.message}（已自动重试 {n} 次）') from None
             log.warning('%s %s attempt %d failed, retrying: %s', label, model['id'], n + 1,
                         _redact(exc.error.message, api_key))
@@ -381,13 +381,13 @@ async def call_endpoint(api_key: str, ep: dict, model: dict, messages: list[dict
     try:
         text, finish, truncated = _PARSERS[ep['api']](data)
     except (KeyError, IndexError, TypeError, AttributeError):
-        raise OpenRouterError('upstream', f'{label} 返回了无法识别的响应。') from None
+        raise ModelError('upstream', f'{label} 返回了无法识别的响应。') from None
     if truncated:
-        raise OpenRouterError('truncated', '输出被截断（达到 max_tokens）。')
+        raise ModelError('truncated', '输出被截断（达到 max_tokens）。')
     try:
         content = extract_json(text)
     except ValueError:
-        raise OpenRouterError('invalid_output', '模型输出无法解析为 JSON。') from None
+        raise ModelError('invalid_output', '模型输出无法解析为 JSON。') from None
     usage = data.get('usage') or {}
     credits = data.get('credits_consumed')
     cost = usage.get('cost') if isinstance(usage, dict) else None

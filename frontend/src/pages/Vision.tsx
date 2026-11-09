@@ -50,7 +50,7 @@ import StepSelect from "../vision/StepSelect";
 import StepUnderstand from "../vision/StepUnderstand";
 import StepRedraw from "../vision/StepRedraw";
 
-const NO_MODELS = "还没有可用的模型：请先到「模型设置」填写 Key、访问码，或添加模型。";
+const NO_MODELS = "还没有可用的模型：请先到「模型设置」填写访问码，或添加自己的模型。";
 const NOT_CONFIGURED = "这个模型已不在「模型设置」中启用，请先启用或改选其他模型。";
 const NO_PURPOSE = "理解用途还没加载出来，请刷新页面后重试。";
 const toRun = (o: PurposeOption): RunPurpose => ({
@@ -169,7 +169,7 @@ export default function Vision() {
     notes: "",
     params: { max_tokens: null, temperature: null, reasoning: null },
     price: null,
-    tag: o.badge,
+    tag: o.badge || undefined,
   }));
   const selected = available
     .map((m) => m.id)
@@ -592,7 +592,7 @@ export default function Vision() {
       )}
       <div className="bottom-tip">
         <span>实验手记</span>
-        模型理解、打分与还原按「模型设置」调用对应平台，Key 只随请求发送、服务器不保存；任务结果只在服务器内存中保留 2 小时，上传的图片在服务器上保留 7 天后自动删除；用途和提示词只保存在本浏览器。
+        模型凭「模型设置」里的访问码使用，自定义模型的 Key 只随请求发送、服务器不保存；任务结果只在服务器内存中保留 2 小时，上传的图片在服务器上保留 7 天后自动删除；用途和提示词只保存在本浏览器。
       </div>
     </>
   );

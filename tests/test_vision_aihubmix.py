@@ -8,8 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import httpx
 from ragent_lab.vision import aihubmix, compat
-from ragent_lab.vision.openrouter import OpenRouterError
-from ragent_lab.vision.registry import VISION_MODELS, gateways_of, get_model
+from ragent_lab.vision.calls import ModelError
+from ragent_lab.vision.registry import VISION_MODELS, get_model
 from ragent_lab.vision.schema import Geometry, Understanding, lean_schema, model_json_schema_for
 
 KEY = 'sk-ahm-0123456789'
@@ -35,10 +35,12 @@ def record(resp):
 
 
 class AIHubMixTests(unittest.TestCase):
-    def test_every_model_but_qwen_is_offered(self):
+    def test_every_catalog_model_has_a_route(self):
+        self.assertEqual(len(VISION_MODELS), 7)
         for m in VISION_MODELS:
             with self.subTest(m['id']):
-                self.assertEqual('aihubmix' in gateways_of(m), m['id'] != 'qwen/qwen3.8-max-prime')
+                self.assertIn(m['route']['api'], ('chat', 'anthropic'))
+                self.assertTrue(m['route']['model'])
 
     def test_claude_uses_native_messages_with_x_api_key(self):
         seen, handler = record(httpx.Response(200, json={
@@ -68,8 +70,8 @@ class AIHubMixTests(unittest.TestCase):
         self.assertEqual(r.content, {'a': 2})
 
     def test_model_without_route(self):
-        with self.assertRaises(OpenRouterError):
-            run_call(lambda req: httpx.Response(200), get_model('qwen/qwen3.8-max-prime'))
+        with self.assertRaises(ModelError):
+            run_call(lambda req: httpx.Response(200), {'id': 'x', 'name': 'X', 'max_tokens': 1})
 
     def test_gemini_gets_a_lean_schema(self):
         seen, handler = record(httpx.Response(200, json={

@@ -14,10 +14,9 @@ from ..vision import netguard, prompts, render, service
 from ..vision.builtin import builtins
 from ..vision.images import (MAX_UPLOAD_BYTES, ImageRejected, PreparedImage, get_sample,
                              images, load_samples, prepare_image)
-from ..vision.openrouter import OpenRouterError
+from ..vision.calls import ModelError
 from ..vision.jobs import public, runner
-from ..vision.registry import (JUDGE_MODEL, VISION_MODELS, gateways_of, get_model, judge_model,
-                               model_prices)
+from ..vision.registry import JUDGE_MODEL, VISION_MODELS, get_model, judge_model
 from ..vision.schema import GeneralUnderstanding, Geometry, Understanding
 
 router = APIRouter(prefix='/api/vision')
@@ -31,11 +30,9 @@ class _Body(BaseModel):
 
 
 class CatalogRef(_Body):
-    """A registry model, called through a proxy platform with the visitor's key."""
+    """A catalog model, run with the server's key (needs the access code)."""
     source: Literal['catalog']
     id: str
-    gateway: Literal['openrouter', 'kie', 'aihubmix'] = 'openrouter'
-    api_key: SecretStr = SecretStr('')
 
 
 class BuiltinRef(_Body):
@@ -61,9 +58,7 @@ ModelRef = Annotated[Union[CatalogRef, BuiltinRef, CustomRef], Field(discriminat
 
 
 class _Keyed(_Body):
-    # Legacy fields, used when `model` / `judge_model` are plain catalog ids.
-    api_key: SecretStr = SecretStr('')
-    gateway: Literal['openrouter', 'kie', 'aihubmix'] = 'openrouter'
+    # One code unlocks every server model (catalog and built-in); custom models bring a key.
     access_code: SecretStr = SecretStr('')
 
 
@@ -115,29 +110,16 @@ class ExportBody(_Body):
     filename: str = Field(default='drawing', max_length=200)
 
 
-GATEWAY_NAMES = {'openrouter': 'OpenRouter', 'kie': 'Kie.ai', 'aihubmix': 'AIHubMix'}
-
-
-def _use_server_key(gateway: str, body: _Keyed, request: Request) -> str:
-    """The server's own platform key, for visitors with the access code (rate-limited)."""
-    name = GATEWAY_NAMES[gateway]
-    if gateway not in builtins.platforms():
-        raise HTTPException(422, f'请填写 {name} Key')
+def _server_access(body: _Keyed, request: Request) -> None:
+    """Every server-paid model needs the access code and counts toward the hourly limit."""
     code = body.access_code.get_secret_value().strip()
     if not code:
-        raise HTTPException(422, f'请填写 {name} Key，或在「模型设置」填写访问码使用服务器的 Key')
+        raise HTTPException(422, '请先在「模型设置」填写访问码')
     ip = _client_ip(request)
     if not builtins.check_code(code, ip):
-        raise HTTPException(403, '访问码不正确，无法使用服务器的 Key')
+        raise HTTPException(403, '访问码不正确')
     if not builtins.take(ip):
-        raise HTTPException(429, f'服务器 Key 每小时最多调用 {builtins.per_hour} 次，请稍后再试')
-    return builtins.platform_keys[gateway]
-
-
-def _platform_key(given: SecretStr, gateway: str, body: _Keyed, request: Request) -> str:
-    """The visitor's own key if they gave one, else the server's (needs the access code)."""
-    key = given.get_secret_value().strip()
-    return key or _use_server_key(gateway, body, request)
+        raise HTTPException(429, f'每小时最多调用 {builtins.per_hour} 次，请稍后再试')
 
 
 def _resolve_image(ref: ImageRef) -> PreparedImage:
@@ -151,23 +133,11 @@ def _resolve_image(ref: ImageRef) -> PreparedImage:
     return found
 
 
-def _check_model(model_id: str, gateway: str = 'openrouter') -> None:
+def _catalog(model_id: str | None, judge: bool = False) -> dict:
     try:
-        model = get_model(model_id)
+        return judge_model(model_id) if judge else get_model(model_id or '')
     except KeyError:
-        raise HTTPException(422, '未知模型') from None
-    if gateway not in gateways_of(model):
-        raise HTTPException(422, f'{model["name"]} 不支持 {GATEWAY_NAMES[gateway]}')
-
-
-def _judge(model_id: str | None, gateway: str = 'openrouter') -> dict:
-    try:
-        judge = judge_model(model_id)
-    except KeyError:
-        raise HTTPException(422, '未知评判模型') from None
-    if gateway not in gateways_of(judge):
-        raise HTTPException(422, f'评判模型 {judge["name"]} 不支持 {GATEWAY_NAMES[gateway]}')
-    return judge
+        raise HTTPException(422, '未知评判模型' if judge else '未知模型') from None
 
 
 def _client_ip(request: Request) -> str:
@@ -184,29 +154,17 @@ def _ref_key(ref, gateway: str) -> str:  # custom endpoints: always the visitor'
 
 async def _resolve(ref, body: _Keyed, request: Request, judge: bool = False):
     """Turn a model reference into (model dict, gateway, api key), checking access."""
-    if isinstance(ref, str) or ref is None:  # legacy: catalog id + body.gateway / api_key
-        if judge:
-            model = _judge(ref, body.gateway)
-        else:
-            _check_model(ref, body.gateway)
-            model = get_model(ref)
-        return model, body.gateway, _platform_key(body.api_key, body.gateway, body, request)
-    if isinstance(ref, CatalogRef):
-        if judge:
-            model = _judge(ref.id, ref.gateway)
-        else:
-            _check_model(ref.id, ref.gateway)
-            model = get_model(ref.id)
-        return model, ref.gateway, _platform_key(ref.api_key, ref.gateway, body, request)
+    if isinstance(ref, str) or ref is None or isinstance(ref, CatalogRef):
+        model = _catalog(ref.id if isinstance(ref, CatalogRef) else ref, judge)
+        if not builtins.catalog_enabled:
+            raise HTTPException(422, '服务器暂未开放这个模型')
+        _server_access(body, request)
+        return model, 'catalog', builtins.catalog_key
     if isinstance(ref, BuiltinRef):
         model = builtins.models.get(ref.id) if builtins.enabled else None
         if model is None:
-            raise HTTPException(422, '该内置模型不可用')
-        ip = _client_ip(request)
-        if not builtins.check_code(body.access_code.get_secret_value().strip(), ip):
-            raise HTTPException(403, '访问码不正确，无法使用内置模型')
-        if not builtins.take(ip):
-            raise HTTPException(429, f'内置模型每小时最多调用 {builtins.per_hour} 次，请稍后再试')
+            raise HTTPException(422, '该模型暂不可用')
+        _server_access(body, request)
         return model, 'builtin', model['api_key']
     # CustomRef
     try:
@@ -235,12 +193,13 @@ def _job(kind: str, label: str, factory) -> dict:
 
 
 @router.get('/models')
-async def models():
-    prices = await model_prices()
+def models():
+    """Catalog models (names only). Empty when the server has no catalog key or code."""
+    if not builtins.catalog_enabled:
+        return []
     return [{'id': m['id'], 'name': m['name'], 'family': m['family'], 'notes': m['notes'],
              'params': {'max_tokens': m['max_tokens'], 'temperature': m['temperature'],
-                        'reasoning': m['reasoning']},
-             'price': prices.get(m['id']), 'gateways': gateways_of(m)} for m in VISION_MODELS]
+                        'reasoning': m['reasoning']}} for m in VISION_MODELS]
 
 
 @router.get('/purposes')
@@ -259,7 +218,7 @@ def judge():
 def builtin_models():
     """Built-in models (names only) and whether they are offered at all."""
     return {'enabled': builtins.enabled, 'per_hour': builtins.per_hour,
-            'models': builtins.public_list(), 'platforms': builtins.platforms()}
+            'models': builtins.public_list()}
 
 
 class AccessBody(_Body):
@@ -362,7 +321,7 @@ async def generate(body: GenerateBody, request: Request):
         try:
             rendered = await bounded_render('generate', render.render_all, geometry, understanding)
         except RenderBusy:
-            raise OpenRouterError('timeout', RENDER_BUSY) from None
+            raise ModelError('timeout', RENDER_BUSY) from None
         return {'geometry': out['geometry'], **rendered, 'meta': out['meta']}
     return _job('generate', model['name'], factory)
 

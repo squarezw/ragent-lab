@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import httpx
 from ragent_lab.vision import compat, netguard
 from ragent_lab.vision.builtin import FAILED_CODE_LIMIT, Builtins
-from ragent_lab.vision.openrouter import OpenRouterError
+from ragent_lab.vision.calls import ModelError
 
 
 def resolver(*ips):
@@ -115,13 +115,14 @@ class BuiltinTests(unittest.TestCase):
         self.assertFalse(b.take('1.1.1.1'))
         self.assertTrue(b.take('9.9.9.9'))
 
-    def test_platform_keys_need_access_code(self):
-        b = self.make(OPENROUTER_API_KEY=' sk-or ', KIE_API_KEY='')
-        self.assertEqual(b.platforms(), ['openrouter'])
-        self.assertEqual(b.platform_keys, {'openrouter': 'sk-or'})
-        self.assertEqual(self.make(OPENROUTER_API_KEY='sk-or', LAB_ACCESS_CODE=None).platforms(), [])
-        # Platform keys alone (no built-in models) still enable the access code.
-        only = Builtins({'OPENROUTER_API_KEY': 'sk-or', 'LAB_ACCESS_CODE': 'x'})
+    def test_catalog_key_needs_access_code(self):
+        b = self.make(AIHUBMIX_API_KEY=' sk-hub ')
+        self.assertTrue(b.catalog_enabled)
+        self.assertEqual(b.catalog_key, 'sk-hub')
+        self.assertFalse(self.make(AIHUBMIX_API_KEY='sk-hub', LAB_ACCESS_CODE=None).catalog_enabled)
+        self.assertFalse(self.make().catalog_enabled)
+        # The catalog key alone (no built-in models) still enables the access code.
+        only = Builtins({'AIHUBMIX_API_KEY': 'sk-hub', 'LAB_ACCESS_CODE': 'x'})
         self.assertTrue(only.enabled)
         self.assertEqual(only.public_list(), [])
 
@@ -203,7 +204,7 @@ class CustomEndpointTests(unittest.TestCase):
         seen = []
         resp = httpx.Response(302, headers={'location': 'http://169.254.169.254/'})
         with self.assertLogs('ragent_lab.vision.compat', level='WARNING'), \
-                self.assertRaises(OpenRouterError):
+                self.assertRaises(ModelError):
             call(self.ep(), lambda req: seen.append(req) or resp)
         self.assertEqual(len(seen), 1)
 
@@ -211,7 +212,7 @@ class CustomEndpointTests(unittest.TestCase):
         seen = []
         with patch.object(netguard, 'check_public_https',
                           side_effect=netguard.UnsafeURL('接口地址不能指向本机或内网')), \
-                self.assertRaises(OpenRouterError) as cm:
+                self.assertRaises(ModelError) as cm:
             call(self.ep(public_only=True), lambda req: seen.append(req) or chat_ok())
         self.assertIn('内网', cm.exception.message)
         self.assertEqual(seen, [])

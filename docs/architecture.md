@@ -8,7 +8,7 @@
 - `src/ragent_lab/api/`：请求 schema、实验目录、算法适配及 HTTP 路由。
 - `src/ragent_lab/chunking/`：11 种分块策略和注册表。语义模型延迟加载、缓存。
 - `src/ragent_lab/embedding/`：Embedding 模型接口和注册表。云端 API 或本地模型。
-- `src/ragent_lab/vision/`：图像理解与重绘。模型目录（`registry.py`）、OpenRouter 调用（`openrouter.py`）、Kie.ai 调用（`kie.py`，按模型族分别走 Anthropic Messages / OpenAI Responses / Chat Completions）、AIHubMix 调用（`aihubmix.py`，Claude 走原生 Messages，其余走 Chat Completions）、提示词与理解用途（`prompts.py`，每个用途是可替换的提示词加固定的规则和 JSON Schema）、图片预处理与仓库外样例加载（`images.py`）、内存任务队列（`jobs.py`）、理解/打分/一致性/生成服务（`service.py`）、几何 schema（`schema.py`）与 PDF/DXF 渲染（`render.py`）。
+- `src/ragent_lab/vision/`：图像理解与重绘。模型目录（`registry.py`，每个模型带 AIHubMix 路由）、AIHubMix 调用（`aihubmix.py`，Claude 走原生 Messages，其余走 Chat Completions）、通用流式客户端（`compat.py`）、结果与错误类型（`calls.py`）、提示词与理解用途（`prompts.py`，每个用途是可替换的提示词加固定的规则和 JSON Schema）、图片预处理与仓库外样例加载（`images.py`）、内存任务队列（`jobs.py`）、理解/打分/一致性/生成服务（`service.py`）、几何 schema（`schema.py`）与 PDF/DXF 渲染（`render.py`）。
 - `docker/`：独立前后端镜像，内部网络和持久模型缓存。
 - `deploy/`：按提交版本部署、健康检查和失败恢复。
 
@@ -55,4 +55,4 @@ API 不导入 Streamlit，不返回模型实例、函数或服务端密钥。验
 
 ## 扩展
 
-实验目录是前后端共享的发现入口。每个新实验增加独立页面和 API 模块。图像理解（`vision`）通过访客选择的通道（OpenRouter，或 Kie.ai：仅 Claude、GPT、Gemini、Kimi）调用视觉模型，Key 由访客在网页输入，请求体用 `gateway` 字段区分；Kie.ai 按积分计费，结果里记为 `credits`。长耗时的理解、打分、一致性和生成走内存任务队列（2 小时过期，不落盘），前端轮询 `/api/vision/jobs/{job_id}`。上传的图纸存在 `VISION_UPLOAD_DIR`（Docker 卷，默认 7 天过期）。模型调用分三类：目录模型经 OpenRouter（`openrouter.py`）或 Kie.ai（`kie.py`）；服务器内置模型（`builtin.py`，env 配置、访问码解锁、按 IP 限次）和访客自定义接口都走通用流式客户端 `compat.py`，自定义地址先经 `netguard.py` 校验只能是公网 https。请求体里的 `model` / `judge` 是带来源的引用（`catalog` | `builtin` | `custom`）。内置样例和细则放在仓库外的 `VISION_SAMPLES_DIR`，格式见 README“图像理解样例”。
+实验目录是前后端共享的发现入口。每个新实验增加独立页面和 API 模块。图像理解（`vision`）的模型都在服务器上调用：目录模型用服务器的 `AIHUBMIX_API_KEY` 经 AIHubMix，内置模型（`builtin.py`，env 配置）直连厂商接口，二者都要访问码、按 IP 限次；访客自定义接口带自己的 Key，地址先经 `netguard.py` 校验只能是公网 https。三类都走通用流式客户端 `compat.py`，每次调用在 API 日志写一行 `vision call …`（见 README“调试模型调用”）。长耗时的理解、打分、一致性和生成走内存任务队列（2 小时过期，不落盘），前端轮询 `/api/vision/jobs/{job_id}`，可随时 `POST /api/vision/jobs/{job_id}/cancel`。上传的图纸存在 `VISION_UPLOAD_DIR`（Docker 卷，默认 7 天过期）。请求体里的 `model` / `judge` 是带来源的引用（`catalog` | `builtin` | `custom`）。内置样例和细则放在仓库外的 `VISION_SAMPLES_DIR`，格式见 README“图像理解样例”。
