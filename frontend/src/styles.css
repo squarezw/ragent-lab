@@ -3183,3 +3183,11 @@ main {
 .json-literal {
   color: #8a3d8f;
 }
+.vision-generation > .vision-cancel,
+.vision-section-title .button {
+  align-self: flex-start;
+}
+.vision-model-card.is-cancelled,
+.vision-generation.is-cancelled {
+  border-style: dashed;
+}

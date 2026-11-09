@@ -400,6 +400,15 @@ async def export(body: ExportBody):
     return Response(data, media_type=media, headers={'Content-Disposition': disposition})
 
 
+@router.post('/jobs/{job_id}/cancel')
+async def cancel_job(job_id: str):
+    found = runner.cancel(job_id)
+    if found is None:
+        raise HTTPException(404, JOB_GONE)
+    await asyncio.sleep(0)  # let the cancelled task record its state
+    return public(found)
+
+
 @router.get('/jobs/{job_id}')
 def job(job_id: str):
     found = runner.get(job_id)

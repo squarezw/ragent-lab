@@ -52,7 +52,6 @@ export type ModelOption = {
   name: string;
   source: "catalog" | "builtin" | "custom";
   badge: string;
-  priceLabel: string;
   ready: boolean;
   problem?: string;
   ref: ModelRef;
@@ -321,16 +320,6 @@ export function hostOf(url: string): string {
   }
 }
 
-function perMillion(price: VisionModel["price"]): string {
-  if (!price || price.prompt == null || price.completion == null)
-    return "价格未知";
-  const fmt = (v: string) => {
-    const n = Number(v) * 1e6;
-    return Number.isFinite(n) ? `$${n.toFixed(2)}` : "?";
-  };
-  return `输入 ${fmt(price.prompt)} · 输出 ${fmt(price.completion)} / 百万 token`;
-}
-
 // Every model the visitor can pick, in display order: catalog, built-in, custom.
 export function buildOptions(
   s: ModelSettings,
@@ -348,7 +337,6 @@ export function buildOptions(
       name: m.name,
       source: "catalog",
       badge: GATEWAY_NAMES[via],
-      priceLabel: via === "kie" ? "按 Kie.ai 积分计费" : perMillion(m.price),
       ready: enabled && key.trim() !== "",
       problem: key.trim() ? undefined : `未填写 ${GATEWAY_NAMES[via]} Key`,
       ref: { source: "catalog", id: m.id, gateway: via, api_key: key },
@@ -364,7 +352,6 @@ export function buildOptions(
         name: m.name,
         source: "builtin",
         badge: "内置",
-        priceLabel: m.notes || "服务器提供",
         ready: enabled && code,
         problem: code ? undefined : "未填写访问码",
         ref: { source: "builtin", id: m.id },
@@ -382,7 +369,6 @@ export function buildOptions(
       name: c.name,
       source: "custom",
       badge: "自定义",
-      priceLabel: hostOf(c.url),
       ready: c.enabled && !missing,
       problem: missing,
       ref: {

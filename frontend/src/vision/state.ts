@@ -4,7 +4,7 @@ import type {
   RunMeta, ScoreResult,
 } from "./types";
 
-export type RunStatus = "idle" | "queued" | "running" | "done" | "failed";
+export type RunStatus = "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
 
 export type RunEntry = {
   model: string;

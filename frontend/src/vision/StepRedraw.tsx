@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, FileDown, PenTool } from "lucide-react";
+import { AlertTriangle, FileDown, PenTool, Square } from "lucide-react";
 import { EmptyState, ErrorMessage, Panel, RunButton } from "../components/UI";
 import JsonViewer from "../components/JsonViewer";
 import { exportFile, imageUrl } from "./client";
-import { formatCost, formatElapsed, StatusIcon } from "./ModelStatusCard";
+import { formatElapsed, StatusIcon } from "./ModelStatusCard";
 import type { GenerationEntry, RunEntry } from "./state";
 import type { DimWarning, ImageRef, VisionModel } from "./types";
 
@@ -27,12 +27,14 @@ function GenerationCard({
   image,
   imageName,
   names,
+  onCancel,
 }: {
   index: number;
   entry: GenerationEntry;
   image: ImageRef | null;
   imageName: string;
   names: Record<string, string>;
+  onCancel: () => void;
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"" | "pdf" | "dxf">("");
@@ -69,12 +71,14 @@ function GenerationCard({
         </div>
         <span className={`vision-status-tag is-${entry.status}`}>
           <StatusIcon status={entry.status} />
-          {pending ? "生成中" : entry.status === "done" ? "已完成" : "失败"}
-          {!pending && entry.meta && (
-            <small>
-              {formatElapsed(entry.meta)} · {formatCost(entry.meta)}
-            </small>
-          )}
+          {pending
+            ? "生成中"
+            : entry.status === "done"
+              ? "已完成"
+              : entry.status === "cancelled"
+                ? "已取消"
+                : "失败"}
+          {!pending && entry.meta && <small>{formatElapsed(entry.meta)}</small>}
         </span>
       </header>
       {entry.status === "failed" && (
@@ -84,6 +88,12 @@ function GenerationCard({
         <p className="field-help">
           模型正在按理解结果绘制几何，通常需要 1–3 分钟。
         </p>
+      )}
+      {pending && (
+        <button type="button" className="button secondary vision-cancel" onClick={onCancel}>
+          <Square size={11} />
+          取消
+        </button>
       )}
       {entry.status === "done" && entry.svg && (
         <>
@@ -158,6 +168,7 @@ export default function StepRedraw({
   imageName,
   error,
   onGenerate,
+  onCancel,
 }: {
   models: VisionModel[];
   runs: Record<string, RunEntry>;
@@ -166,6 +177,7 @@ export default function StepRedraw({
   imageName: string;
   error: string;
   onGenerate: (sourceModel: string, generator: string) => void;
+  onCancel: (id: string) => void;
 }) {
   const done = Object.values(runs).filter((r) => r.status === "done");
   // Default to the source model when the current gateway serves it, else the first one it does.
@@ -258,6 +270,7 @@ export default function StepRedraw({
                 image={image}
                 imageName={imageName}
                 names={names}
+                onCancel={() => onCancel(g.id)}
               />
             ))}
           </div>

@@ -3,6 +3,7 @@ import {
   CircleDashed,
   LoaderCircle,
   RotateCcw,
+  Square,
   XCircle,
 } from "lucide-react";
 import JsonViewer from "../components/JsonViewer";
@@ -16,22 +17,17 @@ const STATUS: Record<RunStatus, string> = {
   running: "运行中",
   done: "已完成",
   failed: "失败",
+  cancelled: "已取消",
 };
 const VERDICT = { correct: "正确", uncertain: "存疑", wrong: "错误" } as const;
 
-export const formatCost = (meta?: RunMeta) =>
-  meta?.credits != null
-    ? `${meta.credits} 积分`
-    : meta?.cost == null
-      ? "费用未知"
-      : `$${meta.cost.toFixed(4)}`;
 export const formatElapsed = (meta?: RunMeta) =>
   meta ? `${(meta.elapsed_ms / 1000).toFixed(1)} s` : "—";
 
 export function StatusIcon({ status }: { status: RunStatus }) {
   if (status === "done") return <CheckCircle2 size={14} />;
   if (status === "failed") return <XCircle size={14} />;
-  if (status === "idle") return <CircleDashed size={14} />;
+  if (status === "idle" || status === "cancelled") return <CircleDashed size={14} />;
   return <LoaderCircle className="spin" size={14} />;
 }
 
@@ -40,13 +36,16 @@ export default function ModelStatusCard({
   scorable,
   onRetry,
   onRetryScore,
+  onCancel,
 }: {
   run: RunEntry;
   scorable: boolean;
   onRetry: () => void;
   onRetryScore: () => void;
+  onCancel: () => void;
 }) {
   const pending = run.status === "queued" || run.status === "running";
+  const busy = pending || run.scoreStatus === "running";
   return (
     <article className={`vision-model-card is-${run.status}`}>
       <div className="vision-card-top">
@@ -61,10 +60,6 @@ export default function ModelStatusCard({
         <div>
           <dt>耗时</dt>
           <dd>{pending ? "…" : formatElapsed(run.meta)}</dd>
-        </div>
-        <div>
-          <dt>费用</dt>
-          <dd>{pending ? "…" : formatCost(run.meta)}</dd>
         </div>
         {scorable && run.status === "done" && (
           <div className="vision-score">
@@ -83,9 +78,17 @@ export default function ModelStatusCard({
           </div>
         )}
       </dl>
-      {run.status === "failed" && (
+      {busy && (
+        <button type="button" className="button secondary" onClick={onCancel}>
+          <Square size={11} />
+          {pending ? "取消" : "取消评分"}
+        </button>
+      )}
+      {(run.status === "failed" || run.status === "cancelled") && (
         <>
-          <ErrorMessage message={run.error ?? "运行失败"} />
+          {run.status === "failed" && (
+            <ErrorMessage message={run.error ?? "运行失败"} />
+          )}
           <button type="button" className="button secondary" onClick={onRetry}>
             <RotateCcw size={13} />
             重试
