@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, FileDown, PenTool, Square } from "lucide-react";
+import { AlertTriangle, ChevronDown, FileDown, PenTool, Square } from "lucide-react";
 import { EmptyState, ErrorMessage, Panel, RunButton } from "../components/UI";
 import JsonViewer from "../components/JsonViewer";
 import { exportFile, imageUrl } from "./client";
@@ -38,6 +38,12 @@ function GenerationCard({
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"" | "pdf" | "dxf">("");
+  // Warnings stay folded behind a small button until the visitor asks for them.
+  const [showNotes, setShowNotes] = useState(false);
+  const warnings = entry.warnings ?? [];
+  const skipped = entry.skipped?.length ?? 0;
+  const notes = warnings.length + (skipped > 0 ? 1 : 0);
+  const notesId = `notes-${entry.id}`;
   async function download(format: "pdf" | "dxf") {
     if (!entry.geometry) return;
     setBusy(format);
@@ -109,22 +115,6 @@ function GenerationCard({
               <img src={svgDataUrl(entry.svg)} alt="模型还原的图纸" />
             </figure>
           </div>
-          {(entry.warnings?.length ?? 0) > 0 && (
-            <ul className="vision-warnings">
-              {entry.warnings!.map((w, i) => (
-                <li key={i}>
-                  <AlertTriangle size={13} />
-                  <span>{w.message}</span>
-                  {warningDetail(w) && <small>{warningDetail(w)}</small>}
-                </li>
-              ))}
-            </ul>
-          )}
-          {(entry.skipped?.length ?? 0) > 0 && (
-            <p className="field-help">
-              已跳过 {entry.skipped!.length} 个无法绘制的实体。
-            </p>
-          )}
           <ErrorMessage message={error} />
           <div className="vision-actions">
             <button
@@ -153,7 +143,37 @@ function GenerationCard({
                 label="几何 JSON"
               />
             )}
+            {notes > 0 && (
+              <button
+                type="button"
+                className="text-button vision-notes-toggle"
+                aria-expanded={showNotes}
+                aria-controls={notesId}
+                onClick={() => setShowNotes((v) => !v)}
+              >
+                <AlertTriangle size={12} />
+                {notes} 条提示
+                <ChevronDown size={12} className={showNotes ? "flip" : ""} />
+              </button>
+            )}
           </div>
+          {notes > 0 && showNotes && (
+            <ul className="vision-warnings" id={notesId}>
+              {warnings.map((w, i) => (
+                <li key={i}>
+                  <AlertTriangle size={13} />
+                  <span>{w.message}</span>
+                  {warningDetail(w) && <small>{warningDetail(w)}</small>}
+                </li>
+              ))}
+              {skipped > 0 && (
+                <li>
+                  <AlertTriangle size={13} />
+                  <span>已跳过 {skipped} 个无法绘制的实体。</span>
+                </li>
+              )}
+            </ul>
+          )}
         </>
       )}
     </article>

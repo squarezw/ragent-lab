@@ -2890,6 +2890,14 @@ main {
   padding: 7px 10px;
   overflow-wrap: anywhere;
 }
+.vision-notes-toggle {
+  color: #9a6a1f;
+  font-size: 11px;
+  align-self: center;
+}
+.vision-notes-toggle .flip {
+  transform: rotate(180deg);
+}
 .vision-warnings small {
   font: 9px var(--mono);
   color: #a99563;

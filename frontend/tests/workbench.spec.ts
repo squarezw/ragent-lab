@@ -403,8 +403,17 @@ test("vision: understand two models, score, redraw and download", async ({
     "src",
     /^data:image\/svg\+xml/,
   );
+  // Warnings are folded behind a small button.
+  await expect(gen).not.toContainText("引用了不存在的尺寸 D9");
+  const notes = gen.getByRole("button", { name: /2 条提示/ });
+  await expect(notes).toHaveAttribute("aria-expanded", "false");
+  await notes.click();
+  await expect(notes).toHaveAttribute("aria-expanded", "true");
   await expect(gen).toContainText("引用了不存在的尺寸 D9");
+  await expect(gen).toContainText("预期 120 mm · 实际 118 mm");
   await expect(gen).not.toContainText("预期 0 mm");
+  await notes.click();
+  await expect(gen).not.toContainText("引用了不存在的尺寸 D9");
   const download = page.waitForEvent("download");
   await gen.getByRole("button", { name: "下载 DXF" }).click();
   expect((await download).suggestedFilename()).toMatch(/\.dxf$/);
