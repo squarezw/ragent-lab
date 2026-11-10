@@ -43,8 +43,11 @@ _DIM_STYLE_ATTRS = {
     'dimexo': 1.0, 'dimgap': 1.0, 'dimdec': 2, 'dimzin': 8, 'dimlunit': 2, 'dimtad': 1,
     'dimtxsty': CJK_STYLE,
 }
-# White paper: ezdxf then draws ACI 7 (OUTLINE) black instead of white.
+# White paper for the PDF: ezdxf then draws ACI 7 (OUTLINE) black instead of white.
 _DRAW_CONFIG = config.Configuration(background_policy=config.BackgroundPolicy.WHITE)
+# The on-screen preview is dark, like a CAD model space: ACI 7 is white, and the green
+# dimensions and grey hidden lines stand out.
+_PREVIEW_CONFIG = config.Configuration(background_policy=config.BackgroundPolicy.BLACK)
 _SKIPPED_ATTR = 'vision_skipped'
 _SHEET_ATTR = 'vision_sheet'
 
@@ -180,17 +183,20 @@ def _sheet_of(doc: Drawing) -> tuple[float, float]:
     return (297.0, 210.0)
 
 
-def _draw(doc: Drawing, backend) -> None:
-    frontend = Frontend(RenderContext(doc), backend, config=_DRAW_CONFIG)
+def _draw(doc: Drawing, backend, cfg: config.Configuration = _DRAW_CONFIG) -> None:
+    frontend = Frontend(RenderContext(doc), backend, config=cfg)
     frontend.draw_layout(doc.modelspace(), finalize=True)
 
 
-def to_svg(doc: Drawing, sheet: Sheet | None = None) -> str:
-    """SVG of the modelspace, page sized to the sheet with the sheet origin at lower-left."""
+def to_svg(doc: Drawing, sheet: Sheet | None = None, dark: bool = True) -> str:
+    """SVG of the modelspace, page sized to the sheet with the sheet origin at lower-left.
+
+    dark: black background with light lines (the on-screen preview); False for white paper.
+    """
     _ensure_cjk_font()
     width, height = (sheet.width, sheet.height) if sheet else _sheet_of(doc)
     backend = svg.SVGBackend()
-    _draw(doc, backend)
+    _draw(doc, backend, _PREVIEW_CONFIG if dark else _DRAW_CONFIG)
     page = layout.Page(width, height, layout.Units.mm)
     settings = layout.Settings(fit_page=False, scale=1.0)
     box = BoundingBox2d([(0, 0), (width, height)])
