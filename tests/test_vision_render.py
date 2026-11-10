@@ -80,6 +80,19 @@ class SvgPdfTest(unittest.TestCase):
             texts += [t.plain_text() for t in block.query('MTEXT')]
         self.assertEqual(sorted(texts), ['390', 'R128', 'Ø38'])
 
+    def test_preview_is_dark_and_white_paper_is_available(self):
+        g = Geometry.model_validate({'units': 'mm', 'sheet': {'width': 100, 'height': 80},
+                                     'entities': [{'type': 'line', 'layer': 'OUTLINE',
+                                                   'start': [10, 10], 'end': [90, 10]}]})
+        doc = render.build_doc(g)
+        dark = render.to_svg(doc, g.sheet)
+        light = render.to_svg(doc, g.sheet, dark=False)
+        self.assertRegex(dark, r'<rect fill="#000000"')
+        self.assertRegex(light, r'<rect fill="#ffffff"')
+        # OUTLINE (ACI 7) flips to stay visible: white on black, black on white.
+        self.assertIn('stroke: #ffffff', dark)
+        self.assertIn('stroke: #000000', light)
+
     def test_svg_and_pdf_render(self):
         geometry = _geometry()
         doc = render.build_doc(geometry)

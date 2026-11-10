@@ -118,7 +118,7 @@ function GenerationCard({
                 <img src={imageUrl(image)} alt={`原图：${imageName}`} />
               )}
             </figure>
-            <figure aria-label="还原预览">
+            <figure aria-label="还原预览" className="is-dark">
               <figcaption>还原</figcaption>
               <img src={svgDataUrl(entry.svg)} alt="模型还原的图纸" />
             </figure>

@@ -2869,6 +2869,11 @@ main {
   border: 1px solid #e7eddf;
   border-radius: 7px;
 }
+/* The redraw preview is dark like CAD model space; the original image stays on white. */
+.vision-compare .is-dark img {
+  background: #000;
+  border-color: #1f2a1c;
+}
 .vision-warnings {
   list-style: none;
   margin: 0;
