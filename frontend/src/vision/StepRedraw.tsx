@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronDown, FileDown, PenTool, Square } from "lucide-react";
+import { AlertTriangle, ChevronDown, FileDown, PenTool, RotateCcw, Square } from "lucide-react";
 import { EmptyState, ErrorMessage, Panel, RunButton } from "../components/UI";
 import JsonViewer from "../components/JsonViewer";
 import { exportFile, imageUrl } from "./client";
@@ -28,6 +28,7 @@ function GenerationCard({
   imageName,
   names,
   onCancel,
+  onRetry,
 }: {
   index: number;
   entry: GenerationEntry;
@@ -35,6 +36,7 @@ function GenerationCard({
   imageName: string;
   names: Record<string, string>;
   onCancel: () => void;
+  onRetry: () => void;
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"" | "pdf" | "dxf">("");
@@ -89,6 +91,12 @@ function GenerationCard({
       </header>
       {entry.status === "failed" && (
         <ErrorMessage message={entry.error ?? "生成失败"} />
+      )}
+      {(entry.status === "failed" || entry.status === "cancelled") && (
+        <button type="button" className="button secondary vision-cancel" onClick={onRetry}>
+          <RotateCcw size={13} />
+          重试
+        </button>
       )}
       {pending && (
         <p className="field-help">
@@ -189,6 +197,7 @@ export default function StepRedraw({
   error,
   onGenerate,
   onCancel,
+  onRetry,
 }: {
   models: VisionModel[];
   runs: Record<string, RunEntry>;
@@ -198,6 +207,7 @@ export default function StepRedraw({
   error: string;
   onGenerate: (sourceModel: string, generator: string) => void;
   onCancel: (id: string) => void;
+  onRetry: (id: string) => void;
 }) {
   const done = Object.values(runs).filter((r) => r.status === "done");
   // Default to the source model when the current gateway serves it, else the first one it does.
@@ -291,6 +301,7 @@ export default function StepRedraw({
                 imageName={imageName}
                 names={names}
                 onCancel={() => onCancel(g.id)}
+                onRetry={() => onRetry(g.id)}
               />
             ))}
           </div>

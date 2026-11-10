@@ -168,6 +168,7 @@ async function mockVision(
     hang?: boolean;
     cancelled?: string[];
     builtin?: unknown;
+    failGenerateOnce?: boolean;
   },
 ) {
   const jobs = new Map<string, Job>();
@@ -290,6 +291,12 @@ async function mockVision(
           hang: opts.hang,
           fail: fail ? "Claude 暂时不可用：上游返回 503。" : undefined,
         }),
+      );
+    }
+    if (path === "/generate" && opts.failGenerateOnce && !failed.has("generate")) {
+      failed.add("generate");
+      return route.fulfill(
+        addJob({ kind: "generate", model: modelOf(body.model), fail: "模型输出无法解析为 JSON。" }),
       );
     }
     if (path === "/score" || path === "/consensus" || path === "/generate")
@@ -673,4 +680,23 @@ test("vision: one access code unlocks every model, nothing names a platform", as
   const stored = await page.evaluate(() => JSON.stringify(localStorage));
   expect(stored).toContain("lab-model-settings");
   expect(stored).not.toContain("the-code");
+});
+
+test("vision: a failed redraw can be retried in the same card", async ({ page }) => {
+  await mockVision(page, { samples: [SAMPLE], failGenerateOnce: true });
+  await page.goto("/#vision");
+  await page.getByRole("button", { name: /法兰盘/ }).click();
+  await startUnderstanding(page);
+  await expect(page.locator(".vision-model-card", { hasText: "已完成" })).toHaveCount(2, {
+    timeout: 20000,
+  });
+  await page.getByRole("button", { name: "③ 还原 DXF" }).click();
+  await page.getByRole("button", { name: "生成还原图" }).click();
+  const gen = page.locator(".vision-generation");
+  await expect(gen).toContainText("模型输出无法解析为 JSON。", { timeout: 20000 });
+  await gen.getByRole("button", { name: "重试" }).click();
+  await expect(gen).toHaveCount(1);
+  await expect(gen.getByLabel("还原预览")).toBeVisible({ timeout: 20000 });
+  await expect(gen).not.toContainText("模型输出无法解析为 JSON。");
+  await expect(gen.getByRole("button", { name: "重试" })).toHaveCount(0);
 });

@@ -386,7 +386,10 @@ async def call_endpoint(api_key: str, ep: dict, model: dict, messages: list[dict
         raise ModelError('truncated', '输出被截断（达到 max_tokens）。')
     try:
         content = extract_json(text)
-    except ValueError:
+    except ValueError as exc:
+        # Why it failed and how the reply ended (a short tail; never the key).
+        log.warning('%s reply is not JSON (%s): %d chars, finish=%s, ends with %r',
+                    label, exc, len(text or ''), finish, (text or '')[-80:])
         raise ModelError('invalid_output', '模型输出无法解析为 JSON。') from None
     usage = data.get('usage') or {}
     credits = data.get('credits_consumed')
