@@ -412,18 +412,26 @@ export default function Vision() {
     }
   }
 
-  async function generate(sourceModel: string, generator: string) {
+  // retryId: run again in that (failed or cancelled) card instead of adding a new one.
+  async function generate(sourceModel: string, generator: string, retryId?: string) {
     setActionError("");
     const understanding = state.runs[sourceModel]?.understanding;
     const image = state.image;
     if (!understanding || !isEngineering(understanding) || !image || !requireModels())
       return;
-    const id = `gen-${Date.now()}-${++generationSeq}`;
+    const id = retryId ?? `gen-${Date.now()}-${++generationSeq}`;
     const signal = track(`gen:${id}`);
-    dispatch({
-      type: "generationAdd",
-      entry: { id, sourceModel, generator, status: "running" },
-    });
+    if (retryId)
+      dispatch({
+        type: "generationUpdate",
+        id,
+        patch: { status: "running", error: undefined, meta: undefined },
+      });
+    else
+      dispatch({
+        type: "generationAdd",
+        entry: { id, sourceModel, generator, status: "running" },
+      });
     try {
       const r = await withImage(image, (img) =>
         runJob<GenerateResult>(
@@ -588,6 +596,10 @@ export default function Vision() {
           error={actionError}
           onGenerate={(s, g) => void generate(s, g)}
           onCancel={cancelGeneration}
+          onRetry={(id) => {
+            const g = state.generations.find((x) => x.id === id);
+            if (g) void generate(g.sourceModel, g.generator, id);
+          }}
         />
       )}
       <div className="bottom-tip">
