@@ -199,3 +199,61 @@ class RobustnessTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DimensionLabelTests(unittest.TestCase):
+    """Every dimension must measure the number in its label, with or without an understanding."""
+
+    def test_label_values(self):
+        cases = {'390': (390.0, 'linear'), '20.5': (20.5, 'linear'), 'R108': (108.0, 'radius'),
+                 'Ø20': (20.0, 'diameter'), '2-Ø19': (19.0, 'diameter'), '4×Ø8': (8.0, 'diameter'),
+                 '60±0.1': (60.0, 'linear'), 'Ø20H7': (20.0, 'diameter'), '%%c12': (12.0, 'diameter'),
+                 '2-R5': (5.0, 'radius')}
+        for text, want in cases.items():
+            with self.subTest(text):
+                self.assertEqual(render.label_value(text), want)
+        for text in ('', None, '<>', '45°', 'C2', '20+20', 'M10', '待确认'):
+            with self.subTest(text):
+                self.assertIsNone(render.label_value(text))
+
+    def _dims(self, *dims):
+        return Geometry.model_validate({'units': 'mm', 'sheet': {'width': 500, 'height': 400},
+                                        'entities': list(dims)})
+
+    def test_mismatch_is_flagged_whatever_the_process(self):
+        g = self._dims(
+            # labelled 30 but spans 15 (the bracket's misplaced hole row)
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'linear', 'p1': [420, 295],
+             'p2': [420, 280], 'location': [445, 287], 'angle': 90, 'text': '30'},
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'linear', 'p1': [0, 0],
+             'p2': [390, 0], 'location': [195, -20], 'text': '390'},
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'radius', 'p1': [100, 100],
+             'p2': [208, 100], 'location': [150, 150], 'text': 'R108'},
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'diameter', 'p1': [0, 50],
+             'p2': [19.2, 50], 'location': [9, 60], 'text': '2-Ø19'},
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'radius', 'p1': [0, 0],
+             'p2': [10, 0], 'location': [5, 5], 'text': 'Ø20'},  # radius 10 = diameter 20
+            {'type': 'dimension', 'layer': 'DIM', 'dimtype': 'linear', 'p1': [0, 0],
+             'p2': [40, 0], 'location': [20, -5], 'text': '20+20'})
+        ws = render.check_dimension_labels(g)
+        self.assertEqual([(w.entity_index, w.dimension_id, w.expected, w.actual) for w in ws],
+                         [(0, '30', 30.0, 15.0)])
+        self.assertIn('标注「30」', ws[0].message)
+        out = render.render_all(g, None)  # no understanding: still checked
+        self.assertEqual([w['dimension_id'] for w in out['warnings']], ['30'])
+
+    def test_lines_are_not_measured_against_dimensions(self):
+        u = Understanding.model_validate({'part': {'name': 'x'}, 'views': [], 'dimensions': [
+            {'id': 'd195', 'label': '195', 'value': 195, 'kind': 'linear'}]})
+        g = self._dims({'type': 'line', 'layer': 'OUTLINE', 'start': [195, 0], 'end': [195, 60],
+                        'dimension_ref': 'd195'})
+        self.assertEqual(render.check_dimensions(g, u), [])
+
+    def test_one_warning_per_dimension(self):
+        u = Understanding.model_validate({'part': {'name': 'x'}, 'views': [], 'dimensions': [
+            {'id': 'd30', 'label': '30', 'value': 30, 'kind': 'linear'}]})
+        g = self._dims({'type': 'dimension', 'layer': 'DIM', 'dimtype': 'linear', 'p1': [0, 0],
+                        'p2': [15, 0], 'location': [5, -5], 'text': '30', 'dimension_ref': 'd30'})
+        out = render.render_all(g, u)
+        self.assertEqual(len(out['warnings']), 1)
+        self.assertEqual(out['warnings'][0]['message'], '尺寸 30 与图形不符')

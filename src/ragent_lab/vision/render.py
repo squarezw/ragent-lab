@@ -4,6 +4,7 @@ Coordinates: sheet origin lower-left, x right, y up, angles in degrees CCW from 
 """
 import io
 import math
+import re
 from dataclasses import asdict, dataclass
 
 import ezdxf
@@ -236,8 +237,9 @@ def _measure(entity, kind: str) -> float | None:
         if kind == 'radius':
             return entity.radius
         return None
-    if isinstance(entity, LineE):
-        return _dist(entity.start, entity.end)
+    # A line is not measured: a dimension sets a distance, and the lines it positions (an edge
+    # at x = 195, a 25 x 25 chamfer's slanted edge) are rarely that long. Lines are covered by
+    # the dimension entities that span them.
     if isinstance(entity, DimensionE):
         p1, p2 = entity.p1, entity.p2
         if entity.dimtype == 'linear':
@@ -261,8 +263,7 @@ def check_dimensions(geometry: Geometry, understanding: Understanding) -> list[D
             continue
         dim = dims.get(ref)
         if dim is None:
-            warnings.append(DimWarning(index, ref, 0.0, 0.0,
-                                       f'dimension_ref {ref!r} not found in understanding'))
+            warnings.append(DimWarning(index, ref, 0.0, 0.0, f'引用了不存在的尺寸 {ref}'))
             continue
         if dim.value is None:
             continue
@@ -274,14 +275,71 @@ def check_dimensions(geometry: Geometry, understanding: Understanding) -> list[D
         if abs(actual - expected) > tolerance:
             warnings.append(DimWarning(
                 index, ref, expected, round(actual, 4),
-                f'{entity.type} measures {actual:.3f} mm but {ref} ({dim.kind}) is '
-                f'{expected:g} mm (tolerance {tolerance:g} mm)'))
+                f'尺寸 {dim.label or ref} 与图形不符'))
+    return warnings
+
+
+# A dimension's label is what CAD shows, so the length it spans must match the number in it.
+# Labels this check reads: 390, 20.5, R108, Ø20, 2-Ø19, 4×Ø8, 60±0.1, Ø20H7. Labels it
+# cannot compare are skipped: the measured placeholder <>, angles (45°), chamfers (C2),
+# chains written as one label (20+20) and text without a number.
+_DIAMETER_MARKS = ('Ø', 'ø', 'Φ', 'φ', '∅', '%%c', '%%C')
+_COUNT_PREFIX = re.compile(r'^\s*\d+\s*[-×xX*]\s*(?=[ØøΦφ∅Rr%])')
+_NUMBER = re.compile(r'\d+(?:\.\d+)?')
+
+
+def label_value(text: str | None) -> tuple[float, str] | None:
+    """(value, 'linear' | 'diameter' | 'radius') read from a dimension label, or None."""
+    if not text:
+        return None
+    t = text.strip().replace('，', '.').replace('．', '.')
+    if '<>' in t or '°' in t or '+' in _COUNT_PREFIX.sub('', t).split('±')[0]:
+        return None
+    t = _COUNT_PREFIX.sub('', t)
+    m = _NUMBER.search(t)
+    if m is None:
+        return None
+    head = t[:m.start()]
+    if head.strip().upper().startswith('C'):
+        return None
+    if any(mark in head for mark in _DIAMETER_MARKS):
+        kind = 'diameter'
+    elif head.strip().upper().endswith('R'):
+        kind = 'radius'
+    elif head.strip():
+        return None  # some other prefix (M10 thread, S sphere…): not a plain size
+    else:
+        kind = 'linear'
+    return float(m.group()), kind
+
+
+def check_dimension_labels(geometry: Geometry) -> list[DimWarning]:
+    """Every dimension whose label names a size must measure that size (any process)."""
+    warnings: list[DimWarning] = []
+    for index, entity in enumerate(geometry.entities):
+        if not isinstance(entity, DimensionE):
+            continue
+        parsed = label_value(entity.text)
+        if parsed is None:
+            continue
+        expected, kind = parsed
+        actual = _measure(entity, kind)
+        if actual is None:
+            continue
+        tolerance = max(0.5, 0.005 * abs(expected))
+        if abs(actual - expected) > tolerance:
+            warnings.append(DimWarning(index, entity.text or '', expected, round(actual, 4),
+                                       f'标注「{entity.text}」与实际长度不符'))
     return warnings
 
 
 def render_all(geometry: Geometry, understanding: Understanding | None) -> dict:
     doc = build_doc(geometry)
+    # Checked against the understanding (when there is one) and, always, against each label.
     warnings = check_dimensions(geometry, understanding) if understanding is not None else []
+    flagged = {w.entity_index for w in warnings}
+    warnings += [w for w in check_dimension_labels(geometry) if w.entity_index not in flagged]
+    warnings.sort(key=lambda w: w.entity_index)
     return {
         'svg': to_svg(doc, geometry.sheet),
         'warnings': [asdict(w) for w in warnings],
