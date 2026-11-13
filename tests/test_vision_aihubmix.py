@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import httpx
 from ragent_lab.vision import aihubmix, compat
 from ragent_lab.vision.calls import ModelError
-from ragent_lab.vision.registry import VISION_MODELS, get_model
+from ragent_lab.vision.registry import JUDGE_MODEL, VISION_MODELS, get_model
 from ragent_lab.vision.schema import Geometry, Understanding, lean_schema, model_json_schema_for
 
 KEY = 'sk-ahm-0123456789'
@@ -36,26 +36,34 @@ def record(resp):
 
 class AIHubMixTests(unittest.TestCase):
     def test_every_catalog_model_has_a_route(self):
-        self.assertEqual(len(VISION_MODELS), 7)
+        self.assertEqual(len(VISION_MODELS), 8)
         for m in VISION_MODELS:
             with self.subTest(m['id']):
                 self.assertIn(m['route']['api'], ('chat', 'anthropic'))
                 self.assertTrue(m['route']['model'])
 
+    def test_menu_starts_with_fable_then_opus_and_opus_stays_the_judge(self):
+        self.assertEqual([m['id'] for m in VISION_MODELS[:2]],
+                         ['anthropic/claude-fable-5.2', 'anthropic/claude-opus-5.5'])
+        self.assertEqual(JUDGE_MODEL['id'], 'anthropic/claude-opus-5.5')
+
     def test_claude_uses_native_messages_with_x_api_key(self):
-        seen, handler = record(httpx.Response(200, json={
-            'type': 'message', 'stop_reason': 'end_turn',
-            'content': [{'type': 'text', 'text': '{"a": 1}'}],
-            'usage': {'input_tokens': 10, 'output_tokens': 5}}))
-        r = run_call(handler, get_model('anthropic/claude-opus-5.5'))
-        req = seen[0]
-        self.assertEqual(str(req.url), 'https://aihubmix.com/v1/messages')
-        self.assertEqual(req.headers['x-api-key'], KEY)
-        self.assertNotIn('authorization', req.headers)
-        body = json.loads(req.content)
-        self.assertEqual(body['model'], 'claude-opus-5-5')
-        self.assertNotIn('thinkingFlag', body)
-        self.assertEqual((r.content, r.provider), ({'a': 1}, 'AIHubMix'))
+        for model_id, upstream in (('anthropic/claude-fable-5.2', 'claude-fable-5-2'),
+                                   ('anthropic/claude-opus-5.5', 'claude-opus-5-5')):
+            with self.subTest(model_id):
+                seen, handler = record(httpx.Response(200, json={
+                    'type': 'message', 'stop_reason': 'end_turn',
+                    'content': [{'type': 'text', 'text': '{"a": 1}'}],
+                    'usage': {'input_tokens': 10, 'output_tokens': 5}}))
+                r = run_call(handler, get_model(model_id))
+                req = seen[0]
+                self.assertEqual(str(req.url), 'https://aihubmix.com/v1/messages')
+                self.assertEqual(req.headers['x-api-key'], KEY)
+                self.assertNotIn('authorization', req.headers)
+                body = json.loads(req.content)
+                self.assertEqual(body['model'], upstream)
+                self.assertNotIn('thinkingFlag', body)
+                self.assertEqual((r.content, r.provider), ({'a': 1}, 'AIHubMix'))
 
     def test_others_use_chat_with_schema(self):
         seen, handler = record(httpx.Response(200, json={

@@ -1,8 +1,8 @@
 """Vision model catalog. Every model is served through AIHubMix with the server's key.
 
 Model names were checked against https://aihubmix.com/v1/models and each model was tested on
-the sample drawings (2026-11-09). Claude goes through the native Anthropic Messages endpoint,
-the rest through Chat Completions with a JSON schema. Visitors never see which platform serves
+the sample drawings (2026-11-09); Claude Fable 5.2 was added on 2026-11-13. Claude goes through
+the native Anthropic Messages endpoint, the rest through Chat Completions with a JSON schema. Visitors never see which platform serves
 a model; it shows up only in the run's meta (exported JSON) and the API log.
 """
 from __future__ import annotations
@@ -17,10 +17,14 @@ def _chat(model: str, **extra) -> dict:
     return {'api': 'chat', 'model': model, 'json': 'schema', **extra}
 
 
-CLAUDE_ROUTE = {'api': 'anthropic', 'model': 'claude-opus-5-5', 'json': 'prompt'}
+def _claude(model: str) -> dict:
+    return {'api': 'anthropic', 'model': model, 'json': 'prompt'}
 
+
+# The order here is the order of the model menu.
 VISION_MODELS: list[dict] = [
-    _m('anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'anthropic', CLAUDE_ROUTE),
+    _m('anthropic/claude-fable-5.2', 'Claude Fable 5.2', 'anthropic', _claude('claude-fable-5-2')),
+    _m('anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'anthropic', _claude('claude-opus-5-5')),
     _m('openai/gpt-6-astra', 'GPT-6 Astra', 'openai', _chat('gpt-6-astra')),
     # Gemini's schema validator needs anyOf instead of oneOf and no length/count limits.
     _m('google/gemini-4-argon', 'Gemini 4 Argon', 'google',
@@ -34,14 +38,15 @@ VISION_MODELS: list[dict] = [
     _m('minimax/minimax-m3', 'MiniMax M3', 'minimax', _chat('minimax-m3'), max_tokens=64000),
 ]
 
-JUDGE_MODEL: dict = VISION_MODELS[0]
-
-
 def get_model(model_id: str) -> dict:
     for m in VISION_MODELS:
         if m['id'] == model_id:
             return m
     raise KeyError(model_id)
+
+
+# The default judge is named, not "first in the menu": reordering the menu must not change scores.
+JUDGE_MODEL: dict = get_model('anthropic/claude-opus-5.5')
 
 
 def judge_model(model_id: str | None = None) -> dict:

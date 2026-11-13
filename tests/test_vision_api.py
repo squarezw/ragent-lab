@@ -107,7 +107,8 @@ class VisionAPITests(unittest.TestCase):
     def test_models_and_samples(self):
         with TestClient(app) as client:
             models = client.get('/api/vision/models').json()
-            self.assertEqual(len(models), 7)
+            self.assertEqual(len(models), 8)
+            self.assertEqual([m['name'] for m in models[:2]], ['Claude Fable 5.2', 'Claude Opus 5.5'])
             self.assertEqual(set(models[0]), {'id', 'name', 'family', 'notes', 'params'})
             self.assertNotIn('aihubmix', json.dumps(models).lower())
             self.assertEqual(set(models[0]['params']), {'max_tokens', 'temperature', 'reasoning'})
