@@ -141,7 +141,7 @@ bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 
 模型分三类，都在服务器上调用，Key 不会发给浏览器：
 
-- **模型目录**（`src/ragent_lab/vision/registry.py`）：Claude Opus 5.5、GPT-6 Astra、Gemini 4 Argon、GLM-5V Turbo、Kimi K3.1 Pro、Seed 2.1 Turbo、MiniMax M3，全部用服务器的 `AIHUBMIX_API_KEY` 经 AIHubMix 调用（Claude 走原生 Messages 接口，其余走 Chat Completions + JSON Schema）。没有 `AIHUBMIX_API_KEY` 时目录为空。
+- **模型目录**（`src/ragent_lab/vision/registry.py`）：Claude Fable 5.2、Claude Opus 5.5、GPT-6 Astra、Gemini 4 Argon、GLM-5V Turbo、Kimi K3.1 Pro、Seed 2.1 Turbo、MiniMax M3，全部用服务器的 `AIHUBMIX_API_KEY` 经 AIHubMix 调用（Claude 走原生 Messages 接口，其余走 Chat Completions + JSON Schema）。没有 `AIHUBMIX_API_KEY` 时目录为空。
 - **内置模型**（`VISION_BUILTIN_MODELS`）：直连模型厂商自己的接口，例如 DeepSeek、Qwen（阿里云百炼）。阿里云的 Key 只在创建它的地域和套餐对应的地址上有效：普通百炼 Key 用 `https://dashscope.aliyuncs.com/compatible-mode/v1`，Token Plan 的 `sk-sp-…` Key 用 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；地址不对会返回 401 “Incorrect API key”。
 - **自定义模型**：访客自己填接口地址、模型名和 Key。预设可一键填好 DeepSeek、Moonshot（Kimi）、阿里云百炼（Qwen）、智谱（GLM）、OpenAI、Anthropic 官方接口的地址和格式；支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种格式。服务器只调用公网 https 地址，解析到本机或内网的地址会被拒绝，也不跟随重定向。
 
