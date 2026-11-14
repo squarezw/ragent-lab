@@ -13,6 +13,9 @@ legacy_running="$(docker inspect -f '{{.State.Running}}' rag-lab 2>/dev/null || 
 compose() { docker compose --project-name ragent-lab --env-file "$release_dir/release.env" -f "$release_dir/docker/docker-compose.yml" "$@"; }
 # Deterministic ownership/permissions for the read-only samples bind mount.
 install -d -m 0755 "${LAB_VISION_SAMPLES:-$base_dir/vision-samples}"
+# The tuned prompts live only on the server (see vision/prompts.py); never created empty here
+# with content, just made sure the mount source exists.
+install -d -m 0755 "${LAB_VISION_PROMPTS:-$base_dir/vision-prompts}"
 # Pull before stopping the live legacy service.
 if [[ "${LAB_SKIP_PULL:-false}" != true ]]; then compose pull; fi
 rollback() {

@@ -76,8 +76,9 @@ class UnderstandBody(_Keyed):
     image: ImageRef
     model: str | ModelRef
     purpose: PurposeId = prompts.DEFAULT_PURPOSE
-    # The visitor's own instructions; replaces the purpose's default prompt.
+    # Replaces the purpose's default prompt. Only accepted together with the prompt password.
     prompt: str | None = Field(default=None, max_length=prompts.MAX_PROMPT_CHARS)
+    prompt_code: SecretStr = SecretStr('')
 
 
 class GenerateBody(_Keyed):
@@ -202,11 +203,35 @@ def models():
                         'reasoning': m['reasoning']}} for m in VISION_MODELS]
 
 
+def _purposes(with_prompts: bool) -> list[dict]:
+    return [{'id': pid, 'name': p['name'], 'kind': p['kind'], 'description': p['description'],
+             **({'prompt': prompts.purpose_prompt(pid)} if with_prompts else {})}
+            for pid, p in prompts.PURPOSES.items()]
+
+
+def _require_prompt_code(code: SecretStr, request: Request) -> None:
+    """Prompts are shown and replaced only for whoever knows LAB_PROMPT_CODE."""
+    if not builtins.prompts_editable:
+        raise HTTPException(403, '服务器未开放提示词管理')
+    if not builtins.check_prompt_code(code.get_secret_value().strip(), _client_ip(request)):
+        raise HTTPException(403, '提示词管理密码不正确')
+
+
 @router.get('/purposes')
 def purposes():
-    """Built-in understanding purposes with their default (editable) prompts."""
-    return [{'id': pid, 'name': p['name'], 'kind': p['kind'], 'description': p['description'],
-             'prompt': p['prompt']} for pid, p in prompts.PURPOSES.items()]
+    """Built-in understanding purposes. The prompt text is not public: see /purposes/unlock."""
+    return _purposes(with_prompts=False)
+
+
+class PromptCodeBody(_Body):
+    prompt_code: SecretStr
+
+
+@router.post('/purposes/unlock')
+def unlock_purposes(body: PromptCodeBody, request: Request):
+    """The purposes with their default prompts, for whoever has the prompt password."""
+    _require_prompt_code(body.prompt_code, request)
+    return _purposes(with_prompts=True)
 
 
 @router.get('/judge')
@@ -218,7 +243,7 @@ def judge():
 def builtin_models():
     """Built-in models (names only) and whether they are offered at all."""
     return {'enabled': builtins.enabled, 'per_hour': builtins.per_hour,
-            'models': builtins.public_list()}
+            'models': builtins.public_list(), 'prompts_editable': builtins.prompts_editable}
 
 
 class AccessBody(_Body):
@@ -272,8 +297,10 @@ async def upload_image(file: UploadFile = File(...)):
 @router.post('/understand')
 async def understand(body: UnderstandBody, request: Request):
     image = _resolve_image(body.image)
-    model, gateway, key = await _resolve(body.model, body, request)
     purpose, instructions = body.purpose, body.prompt
+    if instructions is not None:  # checked before the model, so a refused prompt costs no call
+        _require_prompt_code(body.prompt_code, request)
+    model, gateway, key = await _resolve(body.model, body, request)
 
     async def factory():
         return await service.understand(key, model, image, gateway, purpose, instructions)

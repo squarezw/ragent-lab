@@ -29,7 +29,8 @@ export type Purpose = {
   name: string;
   kind: PurposeKind;
   description: string;
-  prompt: string;
+  // Only present once prompt management is unlocked with the server's prompt password.
+  prompt?: string;
 };
 
 export type ImageRef = { kind: "sample" | "upload"; id: string };

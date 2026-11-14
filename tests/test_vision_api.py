@@ -278,39 +278,88 @@ class VisionAPITests(unittest.TestCase):
 GENERAL = {'summary': '一张流程图', 'elements': [{'id': 'n1', 'type': '步骤', 'label': '开始'}]}
 
 
+PROMPT_CODE = 'prompt-pw'
+
+
 class PurposeAPITests(unittest.TestCase):
     _wait = VisionAPITests._wait
 
     def setUp(self):
         VisionAPITests.setUp(self)
+        self._serve({**SERVER_ENV, 'LAB_PROMPT_CODE': PROMPT_CODE})
+
+    def _serve(self, env):
+        from ragent_lab.vision.builtin import Builtins
+        p = patch('ragent_lab.api.vision.builtins', Builtins(env))
+        p.start()
+        self.addCleanup(p.stop)
 
     def _understand(self, client, **extra):
         return client.post('/api/vision/understand', json={
             'image': {'kind': 'sample', 'id': 'ok'}, 'model': MODEL, 'access_code': CODE, **extra})
 
-    def test_lists_purposes_with_default_prompts(self):
+    def test_public_purposes_carry_no_prompt_text(self):
         with TestClient(app) as client:
             out = client.get('/api/vision/purposes').json()
+            info = client.get('/api/vision/builtin').json()
         self.assertEqual([p['id'] for p in out], ['engineering', 'chart', 'diagram', 'general'])
         self.assertEqual(out[0]['kind'], 'engineering')
-        self.assertTrue(all(p['prompt'] and p['name'] and p['description'] for p in out))
+        self.assertTrue(all(set(p) == {'id', 'name', 'kind', 'description'} for p in out))
         self.assertEqual({p['kind'] for p in out[1:]}, {'general'})
+        self.assertIs(info['prompts_editable'], True)
+        self.assertNotIn(PROMPT_CODE, json.dumps(info))
 
-    def test_purpose_and_prompt_reach_the_service(self):
+    def test_unlock_returns_prompts_only_for_the_right_password(self):
         with TestClient(app) as client:
-            job, _ = self._wait(client, self._understand(client).json()['job_id'])
+            for body in ({'prompt_code': 'nope'}, {'prompt_code': ''}, {'prompt_code': CODE}):
+                r = client.post('/api/vision/purposes/unlock', json=body)
+                self.assertEqual((r.status_code, r.json()['detail']), (403, '提示词管理密码不正确'))
+            self.assertEqual(client.post('/api/vision/purposes/unlock', json={}).status_code, 422)
+            out = client.post('/api/vision/purposes/unlock',
+                              json={'prompt_code': f' {PROMPT_CODE} '}).json()
+        self.assertEqual([p['id'] for p in out], ['engineering', 'chart', 'diagram', 'general'])
+        self.assertTrue(all(p['prompt'] for p in out))
+
+    def test_wrong_prompt_passwords_lock_the_ip_out(self):
+        with TestClient(app) as client:
+            for _ in range(10):
+                client.post('/api/vision/purposes/unlock', json={'prompt_code': 'nope'})
+            r = client.post('/api/vision/purposes/unlock', json={'prompt_code': PROMPT_CODE})
+            self.assertEqual(r.status_code, 403)
+
+    def test_no_prompt_password_on_the_server_means_nobody_can_manage(self):
+        self._serve(SERVER_ENV)
+        with TestClient(app) as client:
+            self.assertIs(client.get('/api/vision/builtin').json()['prompts_editable'], False)
+            for code in ('', PROMPT_CODE):
+                r = client.post('/api/vision/purposes/unlock', json={'prompt_code': code})
+                self.assertEqual((r.status_code, r.json()['detail']), (403, '服务器未开放提示词管理'))
+            self.assertEqual(self._understand(client, prompt='x', prompt_code='').status_code, 403)
+            self.assertEqual(self._understand(client).status_code, 200)  # default prompt still runs
+
+    def test_default_prompt_needs_no_password(self):
+        with TestClient(app) as client:
+            job, _ = self._wait(client, self._understand(client, purpose='diagram').json()['job_id'])
             self.assertEqual((job['result']['purpose'],
-                              job['result']['instructions']), ('engineering', None))
-            r = self._understand(client, purpose='diagram', prompt='只列出节点')
+                              job['result']['instructions']), ('diagram', None))
+
+    def test_own_prompt_reaches_the_service_only_with_the_password(self):
+        with TestClient(app) as client:
+            for extra in ({}, {'prompt_code': 'nope'}, {'prompt_code': CODE}):
+                r = self._understand(client, purpose='diagram', prompt='只列出节点', **extra)
+                self.assertEqual((r.status_code, r.json()['detail']), (403, '提示词管理密码不正确'))
+            r = self._understand(client, purpose='diagram', prompt='只列出节点',
+                                 prompt_code=PROMPT_CODE)
             job, _ = self._wait(client, r.json()['job_id'])
             self.assertEqual((job['result']['purpose'],
                               job['result']['instructions']), ('diagram', '只列出节点'))
 
     def test_bad_purpose_or_long_prompt_rejected(self):
         with TestClient(app) as client:
+            ok = {'prompt_code': PROMPT_CODE}
             self.assertEqual(self._understand(client, purpose='poetry').status_code, 422)
-            self.assertEqual(self._understand(client, prompt='x' * 8001).status_code, 422)
-            self.assertEqual(self._understand(client, prompt='x' * 8000).status_code, 200)
+            self.assertEqual(self._understand(client, prompt='x' * 8001, **ok).status_code, 422)
+            self.assertEqual(self._understand(client, prompt='x' * 8000, **ok).status_code, 200)
 
     def test_score_and_consensus_accept_general_results(self):
         with TestClient(app) as client:
@@ -457,7 +506,7 @@ class ModelRefAPITests(unittest.TestCase):
             listed = client.get('/api/vision/builtin').json()
             self.assertEqual(listed['models'], [{'id': 'deepseek', 'name': 'DeepSeek（内置）',
                                                  'notes': ''}])
-            self.assertEqual(set(listed), {'enabled', 'per_hour', 'models'})
+            self.assertEqual(set(listed), {'enabled', 'per_hour', 'models', 'prompts_editable'})
             self.assertNotIn('sk-server-secret', json.dumps(listed))
             self.assertNotIn('api.deepseek.com', json.dumps(listed))
             ref = {'source': 'builtin', 'id': 'deepseek'}

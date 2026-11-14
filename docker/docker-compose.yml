@@ -12,9 +12,11 @@ services:
     volumes:
       - model-cache:/cache/huggingface
       - ${LAB_VISION_SAMPLES:-/opt/rag-lab/vision-samples}:/samples:ro
+      - ${LAB_VISION_PROMPTS:-/opt/rag-lab/vision-prompts}:/prompts:ro
       - vision-uploads:/data/vision-uploads
     environment:
       VISION_SAMPLES_DIR: /samples
+      VISION_PROMPTS_DIR: /prompts
       VISION_UPLOAD_DIR: /data/vision-uploads
     mem_limit: 5g
     cpus: 2.0

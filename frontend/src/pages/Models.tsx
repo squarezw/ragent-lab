@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, KeyRound, ListChecks, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, KeyRound, ListChecks, Lock, Plus, Trash2 } from "lucide-react";
 import { ErrorMessage, ExternalLink, PageHeader, Panel } from "../components/UI";
-import { checkAccess, listBuiltin, listModels, listPurposes } from "../vision/client";
+import { checkAccess, listBuiltin, listModels } from "../vision/client";
 import {
   PRESETS,
   buildOptions,
@@ -15,8 +15,11 @@ import {
 import {
   KIND_LABELS,
   MAX_PROMPT_CHARS,
+  lockPrompts,
   newPurpose,
   purposeOptions,
+  unlockPrompts,
+  usePromptAccess,
   usePurposeSettings,
   withPrompt,
   type CustomPurpose,
@@ -306,19 +309,76 @@ function PurposeForm({
   );
 }
 
-function PurposePanel() {
-  const [builtins, setBuiltins] = useState<Purpose[]>([]);
+// Asks for the prompt password. The server checks it; nothing here knows the right one.
+function PromptUnlock() {
+  const [code, setCode] = useState("");
+  const [status, setStatus] = useState<"" | "checking" | string>("");
+  async function unlock() {
+    setStatus("checking");
+    try {
+      await unlockPrompts(code);
+      setStatus("");
+    } catch (e) {
+      setStatus((e as Error).message);
+    }
+  }
+  return (
+    <Panel
+      title="理解用途与提示词"
+      meta={
+        <span className="panel-index">
+          <Lock size={12} /> 已锁定
+        </span>
+      }
+    >
+      <form
+        className="access-row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (code.trim() && status !== "checking") void unlock();
+        }}
+      >
+        <div>
+          <label htmlFor="prompt-code">提示词管理密码</label>
+          <input
+            id="prompt-code"
+            type="password"
+            autoComplete="off"
+            value={code}
+            onChange={(e) => {
+              setStatus("");
+              setCode(e.target.value);
+            }}
+          />
+        </div>
+        <button
+          type="submit"
+          className="button secondary"
+          disabled={!code.trim() || status === "checking"}
+        >
+          {status === "checking" ? "验证中…" : "解锁"}
+        </button>
+      </form>
+      {status && status !== "checking" && <ErrorMessage message={status} />}
+      <p className="field-help">
+        查看和修改提示词、新建用途需要管理密码。未解锁时所有用途都使用服务器的默认提示词。
+        密码只在本标签页内有效，关闭标签页后需要重新输入。
+      </p>
+    </Panel>
+  );
+}
+
+// offered: the server has a prompt password. Without one the panel is not shown at all.
+function PurposePanel({ offered }: { offered: boolean }) {
+  const access = usePromptAccess();
+  const builtins: Purpose[] = access.purposes;
   const [settings, update] = usePurposeSettings();
   const [editing, setEditing] = useState<{ key: string; draft: CustomPurpose } | null>(
     null,
   );
-  const [error, setError] = useState("");
-  useEffect(() => {
-    listPurposes()
-      .then(setBuiltins)
-      .catch((e) => setError(e.message));
-  }, []);
-  const options = purposeOptions(settings, builtins);
+  const error = access.error;
+  if (!access.unlocked) return offered ? <PromptUnlock /> : null;
+  const options = purposeOptions(settings, builtins, true);
 
   function edit(o: PurposeOption) {
     const custom = settings.custom.find((c) => `custom:${c.uid}` === o.key);
@@ -355,17 +415,29 @@ function PurposePanel() {
     <Panel
       title="理解用途与提示词"
       meta={
-        <button
-          type="button"
-          className="text-button"
-          disabled={!builtins.length}
-          onClick={() => {
-            const draft = newPurpose(builtins.find((b) => b.kind === "general") ?? builtins[0]);
-            setEditing({ key: `new:${draft.uid}`, draft });
-          }}
-        >
-          <Plus size={13} /> 添加用途
-        </button>
+        <>
+          <button
+            type="button"
+            className="text-button"
+            disabled={!builtins.length}
+            onClick={() => {
+              const draft = newPurpose(builtins.find((b) => b.kind === "general") ?? builtins[0]);
+              setEditing({ key: `new:${draft.uid}`, draft });
+            }}
+          >
+            <Plus size={13} /> 添加用途
+          </button>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              setEditing(null);
+              lockPrompts();
+            }}
+          >
+            <Lock size={13} /> 锁定
+          </button>
+        </>
       }
     >
       <p className="field-help">
@@ -687,7 +759,7 @@ export default function Models() {
           )}
         </Panel>
 
-        <PurposePanel />
+        <PurposePanel offered={Boolean(builtin?.prompts_editable)} />
       </div>
     </>
   );

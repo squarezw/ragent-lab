@@ -4,7 +4,6 @@ import {
   cancelJob,
   listBuiltin,
   listModels,
-  listPurposes,
   listSamples,
   pollJob,
   submit,
@@ -24,8 +23,11 @@ import {
   purposeOptions,
   purposeRequest,
   selectedPurpose,
+  currentPromptCode,
+  usePromptAccess,
   usePurposeSettings,
   withPrompt,
+  withPromptCode,
   type PurposeOption,
 } from "../vision/purposes";
 import {
@@ -94,7 +96,9 @@ export default function Vision() {
   const [deselected, setDeselected] = useState<string[]>([]);
   const [settings] = useModelSettings();
   const [builtin, setBuiltin] = useState<BuiltinInfo | null>(null);
-  const [purposes, setPurposes] = useState<Purpose[]>([]);
+  // Built-in purposes; their prompt text is only here once prompt management is unlocked.
+  const promptAccess = usePromptAccess();
+  const purposes: Purpose[] = promptAccess.purposes;
   const [purposeSettings, updatePurposes] = usePurposeSettings();
   const [judgePick, setJudgePick] = useState(() => judgeStorage.load());
   const [error, setError] = useState("");
@@ -124,9 +128,6 @@ export default function Vision() {
       .catch(() => setBuiltin(null));
     listSamples()
       .then(setSamples)
-      .catch((e) => setError(e.message));
-    listPurposes()
-      .then(setPurposes)
       .catch((e) => setError(e.message));
   }, []);
 
@@ -189,7 +190,7 @@ export default function Vision() {
     setJudgePick(model);
     judgeStorage.save(model);
   }
-  const purpose = selectedPurpose(purposeSettings, purposes);
+  const purpose = selectedPurpose(purposeSettings, purposes, promptAccess.unlocked);
   // The structure of the results on screen (or of the next run when there are none).
   const kind: PurposeKind = state.purpose?.kind ?? purpose?.kind ?? "engineering";
   // A sample's rubric grades one structure; other purposes only get the consensus check.
@@ -302,7 +303,12 @@ export default function Vision() {
       const result = await withImage(image, (img) =>
         runJob<UnderstandResult>(
           "understand",
-          { image: img, model: refFor(model), ...run.request, ...access },
+          {
+            image: img,
+            model: refFor(model),
+            ...withPromptCode(run.request, currentPromptCode()),
+            ...access,
+          },
           signal,
         ),
       );
@@ -526,7 +532,7 @@ export default function Vision() {
           </button>
         ))}
       </nav>
-      <ErrorMessage message={error} />
+      <ErrorMessage message={error || promptAccess.error} />
       {state.step === 1 && (
         <StepSelect
           samples={samples}
@@ -535,8 +541,9 @@ export default function Vision() {
           scorable={state.scorable}
           models={usable.map((o) => ({ name: o.name, badge: o.badge }))}
           pending={pending.map((o) => `${o.name}：${o.problem ?? "未就绪"}`)}
-          purposes={purposeOptions(purposeSettings, purposes)}
+          purposes={purposeOptions(purposeSettings, purposes, promptAccess.unlocked)}
           purpose={purpose}
+          canEditPrompts={promptAccess.unlocked}
           runPurpose={state.purpose}
           hasRuns={Object.keys(state.runs).length > 0}
           sampleKinds={Object.fromEntries(

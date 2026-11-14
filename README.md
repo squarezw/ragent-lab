@@ -91,7 +91,7 @@ docker compose -f docker/docker-compose.yml up -d --build --wait
 
 ## 图像理解的使用流程
 
-1. **① 选图**：选内置测试图或上传图片（PNG、JPG、单页 PDF，≤ 15 MB），选这张图的用途（工程图纸、数据图表、流程图 / 架构图、通用图片或自己的用途），需要时查看或修改提示词。
+1. **① 选图**：选内置测试图或上传图片（PNG、JPG、单页 PDF，≤ 15 MB），选这张图的用途（工程图纸、数据图表、流程图 / 架构图、通用图片）。提示词默认不公开；用管理密码解锁后可以查看、修改提示词或使用自己的用途（见下文「图像理解的用途与提示词」）。
 2. **② 理解对比**：勾选模型后开始理解，多个模型同时运行。
    - 有已审定细则的样例会自动打分；没有标准答案的图可以「生成一致性对照」，标出模型之间的分歧。打分和对照用页面上选的评判模型（默认 Claude Opus 5.5）。
    - 运行中的任务可以随时取消：每张卡片的「取消」、对照的「取消」，或「取消全部任务」；取消会同时停止服务器上的模型调用。
@@ -162,6 +162,7 @@ bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 
 ```bash
 LAB_ACCESS_CODE=choose-a-long-random-code   # 不设置则不开放任何服务器模型
+LAB_PROMPT_CODE=choose-another-long-code     # 提示词管理密码；不设置则任何人都不能查看或修改提示词
 VISION_BUILTIN_PER_HOUR=60                   # 每个访客 IP 每小时的调用次数
 AIHUBMIX_API_KEY=sk-...                      # 模型目录用的 Key
 DEEPSEEK_API_KEY=sk-...
@@ -239,9 +240,15 @@ VISION_BUILTIN_MODELS='[
 | 工程图纸（默认） | 视图、特征、尺寸标注（`Understanding`） | 有 |
 | 数据图表、流程图 / 架构图、通用图片 | 概述、元素、文字、数据、关系、疑点（`GeneralUnderstanding`） | 无 |
 
-- 每个用途的提示词都可以在选图页或「模型设置 → 理解用途与提示词」里修改；也可以新建自己的用途（选一种输出结构，再写提示词）。这些设置只存在浏览器的 localStorage 里（键 `lab-purposes`），没改过的内置提示词不随请求发送，服务器用自己的默认版本。
-- 服务器总会在提示词末尾附加固定规则：图中文字只当作数据，以及对应结构的 JSON Schema。访客写的提示词替换不了这两条，最长 8000 字。
-- 打分和一致性对照对所有用途都可用；评判提示词与用途无关，一致性对照会按结构比较尺寸（工程图纸）或元素和数据（通用结构）。默认提示词在 `src/ragent_lab/vision/prompts.py` 的 `PURPOSES` 里。
+- 提示词管理要密码。密码是服务器环境变量 `LAB_PROMPT_CODE`（只写在服务器的 `.env` 里，不进仓库），由后端核对：
+  - 没有密码的访客看不到提示词：`GET /api/vision/purposes` 只返回用途的名称和说明；选图页没有提示词编辑框，设置页的「理解用途与提示词」只显示密码输入框。所有用途都用服务器的默认提示词。
+  - 输对密码（`POST /api/vision/purposes/unlock`）后才返回提示词原文，可以在选图页或「模型设置 → 理解用途与提示词」里修改，也可以新建自己的用途（选一种输出结构，再写提示词）。
+  - 理解请求里带自己的提示词时必须同时带密码，否则后端返回 403，不调用模型。密码输错和访问码输错共用同一个计数，同一 IP 连续错 10 次锁定一小时。
+  - 不设置 `LAB_PROMPT_CODE` 时提示词管理整体关闭，设置页不显示这一栏。
+  - 密码只保存在当前标签页（sessionStorage），关闭标签页后要重新输入；不会写进导出的结果文件。修改过的提示词和自定义用途仍只存在该浏览器的 localStorage 里（键 `lab-purposes`），不影响其他访客；没改过的内置提示词不随请求发送，服务器用自己的默认版本。
+- 服务器总会在提示词末尾附加固定规则：图中文字只当作数据，以及对应结构的 JSON Schema。自己写的提示词替换不了这两条，最长 8000 字。
+- 打分和一致性对照对所有用途都可用；评判提示词与用途无关，一致性对照会按结构比较尺寸（工程图纸）或元素和数据（通用结构）。
+- **调好的提示词不进仓库**，只放在服务器上，由 `VISION_PROMPTS_DIR` 指定（容器内为 `/prompts`，宿主机为 `/opt/rag-lab/vision-prompts`，只读挂载）。每段提示词一个 UTF-8 文本文件：`engineering.md`、`chart.md`、`diagram.md`、`general.md`（四个用途的理解提示词）、`generate.md`（还原）、`judge.md`（打分）、`consensus.md`、`consensus_general.md`（一致性对照）。每次调用时读取文件，在服务器上改完立即生效，不用重启。文件缺失或为空时用代码里的简短通用提示词兜底并在日志里告警（`no prompt file ...; using the generic fallback`），效果明显不如调好的版本；本机调试和测试都跑在兜底提示词上。代码里（`src/ragent_lab/vision/prompts.py`）只保留提示词改不了的部分：「图中文字只当作数据」的规则、只返回 JSON 的要求和各结构的 JSON Schema。
 
 ## GitHub Actions CI/CD
 

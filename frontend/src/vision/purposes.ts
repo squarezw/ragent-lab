@@ -1,7 +1,10 @@
 // Understanding purposes: what the image is (engineering drawing, chart, diagram…) and the
-// prompt used to read it. Built-in purposes come from the server; the visitor can edit their
-// prompts or save their own purposes. Kept in this browser only (localStorage).
+// prompt used to read it. Built-in purposes come from the server. Their prompts are hidden;
+// whoever unlocks prompt management with the server's prompt password can read them, edit them
+// and save their own purposes. Edits are kept in this browser only (localStorage) and the
+// server refuses an edited prompt that comes without the password.
 import { useEffect, useState } from "react";
+import { listPurposes, unlockPurposes } from "./client";
 import type { Purpose, PurposeKind } from "./types";
 
 export type CustomPurpose = {
@@ -36,6 +39,8 @@ export type PurposeOption = {
 };
 
 // What the understand request carries; the server adds its fixed rules and the schema.
+// This is also saved with the results (and exported), so it never holds the prompt password:
+// withPromptCode adds that when the request is sent.
 export type PurposeRequest = { purpose: string; prompt?: string };
 
 export const MAX_PROMPT_CHARS = 8000;
@@ -124,13 +129,17 @@ export function usePurposeSettings(): [
 }
 
 // Built-in purposes first, then the visitor's own (those whose base is unknown are dropped).
+// While prompt management is locked, saved edits and own purposes are ignored: every purpose
+// runs the server's default prompt, whose text this browser does not have.
 export function purposeOptions(
   s: PurposeSettings,
   builtins: Purpose[],
+  unlocked: boolean,
 ): PurposeOption[] {
   const out: PurposeOption[] = builtins.map((p) => {
-    const draft = s.overrides[p.id] ?? p.prompt;
-    const prompt = draft.trim() ? draft : p.prompt;
+    const base = unlocked ? (p.prompt ?? "") : "";
+    const draft = unlocked ? (s.overrides[p.id] ?? base) : base;
+    const prompt = draft.trim() ? draft : base;
     return {
       key: `builtin:${p.id}`,
       name: p.name,
@@ -140,11 +149,11 @@ export function purposeOptions(
       description: p.description,
       draft,
       prompt,
-      defaultPrompt: p.prompt,
-      edited: prompt !== p.prompt,
+      defaultPrompt: base,
+      edited: prompt !== base,
     };
   });
-  for (const c of s.custom) {
+  for (const c of unlocked ? s.custom : []) {
     const base = builtins.find((p) => p.id === c.base);
     if (!base) continue;
     out.push({
@@ -155,8 +164,8 @@ export function purposeOptions(
       kind: base.kind,
       description: `自定义 · 基于「${base.name}」`,
       draft: c.prompt,
-      prompt: c.prompt.trim() ? c.prompt : base.prompt,
-      defaultPrompt: base.prompt,
+      prompt: c.prompt.trim() ? c.prompt : (base.prompt ?? ""),
+      defaultPrompt: base.prompt ?? "",
       edited: c.prompt.trim() !== "" && c.prompt !== base.prompt,
     });
   }
@@ -167,8 +176,9 @@ export function purposeOptions(
 export function selectedPurpose(
   s: PurposeSettings,
   builtins: Purpose[],
+  unlocked: boolean,
 ): PurposeOption | null {
-  const options = purposeOptions(s, builtins);
+  const options = purposeOptions(s, builtins, unlocked);
   return (
     options.find((o) => o.key === s.selected) ??
     options.find((o) => o.key === DEFAULT_PURPOSE_KEY) ??
@@ -182,6 +192,15 @@ export function purposeRequest(o: PurposeOption): PurposeRequest {
   return o.edited || o.source === "custom"
     ? { purpose: o.base, prompt: o.prompt.slice(0, MAX_PROMPT_CHARS) }
     : { purpose: o.base };
+}
+
+// The body fields to send: an own prompt goes with the prompt password (the server refuses
+// it otherwise); the default prompt needs none.
+export function withPromptCode(
+  r: PurposeRequest,
+  promptCode: string,
+): PurposeRequest & { prompt_code?: string } {
+  return r.prompt === undefined ? r : { ...r, prompt_code: promptCode };
 }
 
 // Change the prompt of a purpose: an override for a built-in one, the text of a custom one.
@@ -203,6 +222,98 @@ export function withPrompt(
   return { ...s, overrides };
 }
 
+// ---- Prompt management lock ------------------------------------------------
+// The password is checked by the server and kept for this tab only (sessionStorage), so a
+// shared computer does not stay unlocked. One copy for the whole app.
+
+export type PromptAccess = {
+  // The built-in purposes; with their prompt text only when unlocked.
+  purposes: Purpose[];
+  unlocked: boolean;
+  loaded: boolean;
+  error: string;
+};
+
+const CODE_STORAGE = "lab-prompt-code";
+
+function readCode(): string {
+  try {
+    return sessionStorage.getItem(CODE_STORAGE) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeCode(code: string): void {
+  try {
+    if (code) sessionStorage.setItem(CODE_STORAGE, code);
+    else sessionStorage.removeItem(CODE_STORAGE);
+  } catch {
+    /* storage unavailable: unlocked for this page view only */
+  }
+}
+
+let promptCode = readCode();
+let access: PromptAccess = { purposes: [], unlocked: false, loaded: false, error: "" };
+let loading: Promise<void> | null = null;
+const accessListeners = new Set<(a: PromptAccess) => void>();
+
+function setAccess(next: PromptAccess): void {
+  access = next;
+  accessListeners.forEach((fn) => fn(next));
+}
+
+async function loadAccess(): Promise<void> {
+  if (promptCode) {
+    try {
+      const purposes = await unlockPurposes(promptCode);
+      return setAccess({ purposes, unlocked: true, loaded: true, error: "" });
+    } catch {
+      promptCode = "";
+      writeCode("");
+    }
+  }
+  try {
+    setAccess({ purposes: await listPurposes(), unlocked: false, loaded: true, error: "" });
+  } catch (e) {
+    setAccess({ ...access, loaded: true, error: (e as Error).message });
+  }
+}
+
+// The password to send with an own prompt; empty while locked.
+export const currentPromptCode = (): string => (access.unlocked ? promptCode : "");
+
+// Rejects with the server's message when the password is wrong.
+export async function unlockPrompts(code: string): Promise<void> {
+  const purposes = await unlockPurposes(code.trim());
+  promptCode = code.trim();
+  writeCode(promptCode);
+  setAccess({ purposes, unlocked: true, loaded: true, error: "" });
+}
+
+export function lockPrompts(): void {
+  promptCode = "";
+  writeCode("");
+  setAccess({
+    ...access,
+    unlocked: false,
+    purposes: access.purposes.map(({ prompt: _hidden, ...rest }) => rest),
+  });
+}
+
+export function usePromptAccess(): PromptAccess {
+  const [state, setState] = useState(access);
+  useEffect(() => {
+    accessListeners.add(setState);
+    setState(access);
+    loading ??= loadAccess();
+    return () => {
+      accessListeners.delete(setState);
+    };
+  }, []);
+  return state;
+}
+
 export function newPurpose(base: Purpose): CustomPurpose {
   return {
     uid:
@@ -211,6 +322,6 @@ export function newPurpose(base: Purpose): CustomPurpose {
         : Math.random().toString(36).slice(2, 10),
     name: "",
     base: base.id,
-    prompt: base.prompt,
+    prompt: base.prompt ?? "",
   };
 }

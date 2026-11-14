@@ -22,6 +22,7 @@ export default function StepSelect({
   pending,
   purposes,
   purpose,
+  canEditPrompts,
   runPurpose,
   hasRuns,
   sampleKinds,
@@ -38,6 +39,8 @@ export default function StepSelect({
   pending: string[];
   purposes: PurposeOption[];
   purpose: PurposeOption | null;
+  // Prompt management is unlocked (server-checked password); otherwise prompts stay hidden.
+  canEditPrompts: boolean;
   runPurpose?: RunPurpose;
   hasRuns: boolean;
   sampleKinds: Record<string, PurposeKind>;
@@ -148,9 +151,11 @@ export default function StepSelect({
                 </option>
               ))}
             </select>
-            <a className="text-button" href="#models">
-              <SlidersHorizontal size={13} /> 管理用途
-            </a>
+            {canEditPrompts && (
+              <a className="text-button" href="#models">
+                <SlidersHorizontal size={13} /> 管理用途
+              </a>
+            )}
           </div>
           {purpose && (
             <p className="field-help">
@@ -168,7 +173,7 @@ export default function StepSelect({
               已有「{runPurpose?.name}」的理解结果；用新用途开始理解时会清空它们。
             </p>
           )}
-          {purpose && (
+          {purpose && canEditPrompts && (
             <details className="vision-details purpose-prompt">
               <summary>
                 查看 / 编辑提示词

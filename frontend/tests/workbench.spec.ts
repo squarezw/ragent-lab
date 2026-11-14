@@ -125,6 +125,7 @@ const GENERAL = {
   relations: [],
   unresolved: [],
 };
+const PROMPT_CODE = "prompt-pw";
 const PURPOSES = [
   { id: "engineering", name: "工程图纸", kind: "engineering", description: "零件图", prompt: "读零件图" },
   { id: "chart", name: "数据图表", kind: "general", description: "图表", prompt: "读图表" },
@@ -256,10 +257,21 @@ async function mockVision(
     if (path === "/models") return route.fulfill({ json: MODELS });
     if (path === "/builtin")
       return route.fulfill({
-        json: opts.builtin ?? { enabled: true, per_hour: 60, models: [] },
+        json: opts.builtin ?? {
+          enabled: true,
+          per_hour: 60,
+          models: [],
+          prompts_editable: true,
+        },
       });
     if (path === "/samples") return route.fulfill({ json: opts.samples });
-    if (path === "/purposes") return route.fulfill({ json: PURPOSES });
+    // Prompt text is only served to whoever sends the prompt password.
+    if (path === "/purposes")
+      return route.fulfill({ json: PURPOSES.map(({ prompt: _hidden, ...p }) => p) });
+    if (path === "/purposes/unlock")
+      return body?.prompt_code === PROMPT_CODE
+        ? route.fulfill({ json: PURPOSES })
+        : route.fulfill({ status: 403, json: { detail: "提示词管理密码不正确" } });
     if (/^\/(samples\/[^/]+\/image|images\/[^/]+)$/.test(path))
       return route.fulfill({ body: PNG_1x1, contentType: "image/png" });
     if (path === "/images")
@@ -553,6 +565,86 @@ test("vision: an upload the server lost is re-sent automatically", async ({
   expect(images.filter((id) => id === "up-3")).toHaveLength(0);
 });
 
+// Unlock prompt management on the settings page, then open the workbench.
+async function unlockPrompts(page: Page) {
+  await page.goto("/#models");
+  await page.getByLabel("提示词管理密码").fill(PROMPT_CODE);
+  await page.getByRole("button", { name: "解锁" }).click();
+  await expect(page.getByRole("button", { name: "添加用途" })).toBeVisible();
+}
+
+test("vision: prompts stay hidden and unsent until the password unlocks them", async ({
+  page,
+}) => {
+  await mockVision(page, { samples: [] });
+  const bodies: Record<string, unknown>[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
+      bodies.push(r.postDataJSON());
+  });
+  // Edits saved before the lock existed must not be sent or shown.
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "lab-purposes",
+      JSON.stringify({
+        selected: "custom:old",
+        overrides: { engineering: "旧的修改" },
+        custom: [{ uid: "old", name: "旧用途", base: "chart", prompt: "旧提示词" }],
+      }),
+    ),
+  );
+  await page.goto("/#vision");
+  await page.getByLabel("上传图片").setInputFiles({
+    name: "part.png",
+    mimeType: "image/png",
+    buffer: PNG_1x1,
+  });
+  const picker = page.getByLabel("这张图是");
+  await expect(picker).toHaveValue("builtin:engineering");
+  await expect(picker.locator("option")).toHaveCount(PURPOSES.length);
+  await expect(page.getByText("查看 / 编辑提示词")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /管理用途/ })).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("读零件图");
+  await startUnderstanding(page);
+  await expect(
+    page.locator(".vision-model-card", { hasText: "已完成" }),
+  ).toHaveCount(2, { timeout: 20000 });
+  expect(bodies[0]).toMatchObject({ purpose: "engineering" });
+  expect(bodies[0]).not.toHaveProperty("prompt");
+  expect(bodies[0]).not.toHaveProperty("prompt_code");
+
+  // A wrong password keeps everything locked; the right one shows the manager.
+  await page.goto("/#models");
+  await expect(page.getByRole("button", { name: "添加用途" })).toHaveCount(0);
+  await page.getByLabel("提示词管理密码").fill("nope");
+  await page.getByRole("button", { name: "解锁" }).click();
+  await expect(page.getByText("提示词管理密码不正确")).toBeVisible();
+  await expect(page.locator(".purpose-list")).toHaveCount(0);
+  await page.getByLabel("提示词管理密码").fill(PROMPT_CODE);
+  await page.getByRole("button", { name: "解锁" }).click();
+  await expect(
+    page.locator(".purpose-list .purpose-row", { hasText: "旧用途" }),
+  ).toBeVisible();
+  // The password is kept for this tab only, never in localStorage.
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(PROMPT_CODE);
+  await page.getByRole("button", { name: "锁定" }).click();
+  await expect(page.getByLabel("提示词管理密码")).toBeVisible();
+  await expect(page.locator(".purpose-list")).toHaveCount(0);
+});
+
+test("vision: the settings page has no prompt section when the server offers none", async ({
+  page,
+}) => {
+  await mockVision(page, {
+    samples: [],
+    builtin: { enabled: true, per_hour: 60, models: [], prompts_editable: false },
+  });
+  await page.goto("/#models");
+  await expect(page.getByRole("textbox", { name: "访问码" })).toBeVisible();
+  await expect(page.getByText("理解用途与提示词")).toHaveCount(0);
+  await expect(page.getByLabel("提示词管理密码")).toHaveCount(0);
+});
+
 test("vision: a chart purpose with an edited prompt skips redraw", async ({
   page,
 }) => {
@@ -562,6 +654,7 @@ test("vision: a chart purpose with an edited prompt skips redraw", async ({
     if (r.url().endsWith("/api/vision/understand") && r.method() === "POST")
       bodies.push(r.postDataJSON());
   });
+  await unlockPrompts(page);
   await page.goto("/#vision");
   await page.getByLabel("上传图片").setInputFiles({
     name: "chart.png",
@@ -579,7 +672,11 @@ test("vision: a chart purpose with an edited prompt skips redraw", async ({
   await startUnderstanding(page);
   const cards = page.locator(".vision-model-card", { hasText: "已完成" });
   await expect(cards).toHaveCount(2, { timeout: 20000 });
-  expect(bodies[0]).toMatchObject({ purpose: "chart", prompt: "只读出每根柱子的数值" });
+  expect(bodies[0]).toMatchObject({
+    purpose: "chart",
+    prompt: "只读出每根柱子的数值",
+    prompt_code: PROMPT_CODE,
+  });
   await expect(cards.first()).toContainText("Q3 最高");
   await expect(page.getByText("用途：数据图表")).toBeVisible();
   // Other purposes have no redraw step at all.
@@ -601,7 +698,7 @@ test("vision: a chart purpose with an edited prompt skips redraw", async ({
 
 test("vision: a custom purpose is saved and selected", async ({ page }) => {
   await mockVision(page, { samples: [] });
-  await page.goto("/#models");
+  await unlockPrompts(page);
   await page.getByRole("button", { name: "添加用途" }).click();
   await page.getByLabel("用途名称").fill("电路图");
   await expect(page.getByLabel("提示词")).toHaveValue("读图表");
