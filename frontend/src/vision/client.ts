@@ -16,7 +16,10 @@ async function detailOf(response: Response): Promise<string> {
 
 export const listModels = () => api<VisionModel[]>("/vision/models");
 export const listSamples = () => api<Sample[]>("/vision/samples");
+// Without prompt text; unlockPurposes returns it for whoever has the prompt password.
 export const listPurposes = () => api<Purpose[]>("/vision/purposes");
+export const unlockPurposes = (prompt_code: string) =>
+  api<Purpose[]>("/vision/purposes/unlock", { prompt_code });
 export const listBuiltin = () => api<BuiltinInfo>("/vision/builtin");
 export const checkAccess = (access_code: string) =>
   api<{ ok: boolean }>("/vision/access", { access_code });

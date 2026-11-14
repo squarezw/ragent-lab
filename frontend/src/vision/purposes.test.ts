@@ -6,6 +6,7 @@ import {
   purposeRequest,
   selectedPurpose,
   withPrompt,
+  withPromptCode,
   type PurposeSettings,
 } from "./purposes";
 import { reducer, initialState, importState, exportState } from "./state";
@@ -22,20 +23,20 @@ const settings = (patch: Partial<PurposeSettings>): PurposeSettings => ({
 
 describe("purposes", () => {
   it("defaults to the engineering purpose and sends no prompt for it", () => {
-    const o = selectedPurpose(settings({}), BUILTINS)!;
+    const o = selectedPurpose(settings({}), BUILTINS, true)!;
     expect(o.key).toBe("builtin:engineering");
     expect(purposeRequest(o)).toEqual({ purpose: "engineering" });
   });
 
   it("an edited built-in prompt is sent; a blank one falls back to the default", () => {
     let s = settings({ selected: "builtin:chart" });
-    const chart = selectedPurpose(s, BUILTINS)!;
+    const chart = selectedPurpose(s, BUILTINS, true)!;
     s = withPrompt(s, chart, "只读图例");
-    const edited = selectedPurpose(s, BUILTINS)!;
+    const edited = selectedPurpose(s, BUILTINS, true)!;
     expect(edited.edited).toBe(true);
     expect(purposeRequest(edited)).toEqual({ purpose: "chart", prompt: "只读图例" });
     s = withPrompt(s, edited, "  ");
-    const blank = selectedPurpose(s, BUILTINS)!;
+    const blank = selectedPurpose(s, BUILTINS, true)!;
     expect(blank.draft).toBe("  ");
     expect(purposeRequest(blank)).toEqual({ purpose: "chart" });
     s = withPrompt(s, blank, "CHART");
@@ -50,18 +51,44 @@ describe("purposes", () => {
         { uid: "u2", name: "孤儿", base: "gone", prompt: "x" },
       ],
     });
-    expect(purposeOptions(s, BUILTINS).map((o) => o.key)).toEqual([
+    expect(purposeOptions(s, BUILTINS, true).map((o) => o.key)).toEqual([
       "builtin:engineering",
       "builtin:chart",
       "custom:u1",
     ]);
-    const o = selectedPurpose(s, BUILTINS)!;
+    const o = selectedPurpose(s, BUILTINS, true)!;
     expect(o.kind).toBe("general");
     expect(purposeRequest(o)).toEqual({ purpose: "chart", prompt: "读电路" });
     // A deleted selection falls back to the default.
-    expect(selectedPurpose({ ...s, selected: "custom:nope" }, BUILTINS)!.key).toBe(
+    expect(selectedPurpose({ ...s, selected: "custom:nope" }, BUILTINS, true)!.key).toBe(
       "builtin:engineering",
     );
+  });
+
+  it("while locked, saved edits and own purposes are ignored and no prompt is sent", () => {
+    // What the server lists without the password: no prompt text.
+    const hidden: Purpose[] = BUILTINS.map(({ prompt: _hidden, ...p }) => p);
+    const s = settings({
+      selected: "custom:u1",
+      overrides: { engineering: "改过的" },
+      custom: [{ uid: "u1", name: "电路图", base: "chart", prompt: "读电路" }],
+    });
+    const options = purposeOptions(s, hidden, false);
+    expect(options.map((o) => o.key)).toEqual(["builtin:engineering", "builtin:chart"]);
+    expect(options.every((o) => !o.edited && o.prompt === "" && o.draft === "")).toBe(true);
+    const o = selectedPurpose(s, hidden, false)!;
+    expect(o.key).toBe("builtin:engineering");
+    expect(purposeRequest(o)).toEqual({ purpose: "engineering" });
+    // Unlocking brings the saved edits back.
+    expect(selectedPurpose(s, BUILTINS, true)!.key).toBe("custom:u1");
+    expect(purposeOptions(s, BUILTINS, true)[0].edited).toBe(true);
+  });
+
+  it("the prompt password travels only with an own prompt and is not part of the request", () => {
+    expect(withPromptCode({ purpose: "chart" }, "pw")).toEqual({ purpose: "chart" });
+    const own = { purpose: "chart", prompt: "只读图例" };
+    expect(withPromptCode(own, "pw")).toEqual({ ...own, prompt_code: "pw" });
+    expect(own).toEqual({ purpose: "chart", prompt: "只读图例" });
   });
 
   it("parses stored settings defensively", () => {

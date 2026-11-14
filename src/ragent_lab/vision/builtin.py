@@ -15,6 +15,8 @@
                    {"thinking": {"type": "disabled"}} for DeepSeek without thinking
     AIHUBMIX_API_KEY         the key the catalog models are called with (see registry.py)
     LAB_ACCESS_CODE          visitors must enter it to use any server model; unset = disabled
+    LAB_PROMPT_CODE          password for viewing and editing the understanding prompts; unset =
+                             nobody can (the default prompts are still used, just never shown)
     VISION_BUILTIN_PER_HOUR  model calls per visitor IP per hour (default 60)
 
 Keys and endpoint URLs never leave the server: public_list() only returns id, name, notes,
@@ -92,6 +94,7 @@ class Builtins:
         env = os.environ if env is None else env
         self.models = _parse(env.get('VISION_BUILTIN_MODELS', ''), env)
         self._code = env.get('LAB_ACCESS_CODE', '')
+        self._prompt_code = env.get('LAB_PROMPT_CODE', '').strip()
         self.catalog_key = env.get('AIHUBMIX_API_KEY', '').strip()
         self.per_hour = int(env.get('VISION_BUILTIN_PER_HOUR', '60'))
         self._calls: dict[str, deque] = defaultdict(deque)
@@ -119,19 +122,31 @@ class Builtins:
             q.popleft()
         return q
 
-    def check_code(self, code: str, ip: str) -> bool:
-        """True if code is right. Too many wrong codes from one IP lock it out for an hour."""
-        if not self._code:
+    @property
+    def prompts_editable(self) -> bool:
+        """Prompt management is offered: the server has a prompt password."""
+        return bool(self._prompt_code)
+
+    def _check(self, expected: str, code: str, ip: str) -> bool:
+        if not expected:
             return False
         now = time.time()
         with self._lock:
             fails = self._recent(self._fails[ip], now)
             if len(fails) >= FAILED_CODE_LIMIT:
                 return False
-            ok = hmac.compare_digest(code.encode(), self._code.encode())
+            ok = hmac.compare_digest(code.encode(), expected.encode())
             if not ok:
                 fails.append(now)
             return ok
+
+    def check_code(self, code: str, ip: str) -> bool:
+        """True if code is right. Too many wrong codes from one IP lock it out for an hour."""
+        return self._check(self._code, code, ip)
+
+    def check_prompt_code(self, code: str, ip: str) -> bool:
+        """True if code is the prompt password. Wrong tries share the access-code lock-out."""
+        return self._check(self._prompt_code, code, ip)
 
     def take(self, ip: str) -> bool:
         """Count one model call for ip; False if it is over the hourly limit."""

@@ -38,6 +38,8 @@ export type BuiltinInfo = {
   enabled: boolean;
   per_hour: number;
   models: { id: string; name: string; notes: string }[];
+  // The server has a prompt password, so prompt management can be unlocked.
+  prompts_editable?: boolean;
 };
 
 // What the server needs to call a model. Keys travel only in request bodies.

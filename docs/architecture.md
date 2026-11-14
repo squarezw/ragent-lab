@@ -8,7 +8,7 @@
 - `src/ragent_lab/api/`：请求 schema、实验目录、算法适配及 HTTP 路由。
 - `src/ragent_lab/chunking/`：11 种分块策略和注册表。语义模型延迟加载、缓存。
 - `src/ragent_lab/embedding/`：Embedding 模型接口和注册表。云端 API 或本地模型。
-- `src/ragent_lab/vision/`：图像理解与重绘。模型目录（`registry.py`，每个模型带 AIHubMix 路由）、AIHubMix 调用（`aihubmix.py`，Claude 走原生 Messages，其余走 Chat Completions）、通用流式客户端（`compat.py`）、结果与错误类型（`calls.py`）、提示词与理解用途（`prompts.py`，每个用途是可替换的提示词加固定的规则和 JSON Schema）、图片预处理与仓库外样例加载（`images.py`）、内存任务队列（`jobs.py`）、理解/打分/一致性/生成服务（`service.py`）、几何 schema（`schema.py`）与 PDF/DXF 渲染（`render.py`）。
+- `src/ragent_lab/vision/`：图像理解与重绘。模型目录（`registry.py`，每个模型带 AIHubMix 路由）、AIHubMix 调用（`aihubmix.py`，Claude 走原生 Messages，其余走 Chat Completions）、通用流式客户端（`compat.py`）、结果与错误类型（`calls.py`）、提示词与理解用途（`prompts.py`：固定的规则和 JSON Schema 在代码里，调好的提示词正文从服务器目录 `VISION_PROMPTS_DIR` 读取，不进仓库）、图片预处理与仓库外样例加载（`images.py`）、内存任务队列（`jobs.py`）、理解/打分/一致性/生成服务（`service.py`）、几何 schema（`schema.py`）与 PDF/DXF 渲染（`render.py`）。
 - `docker/`：独立前后端镜像，内部网络和持久模型缓存。
 - `deploy/`：按提交版本部署、健康检查和失败恢复。
 
