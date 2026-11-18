@@ -139,7 +139,7 @@ class StreamTests(unittest.TestCase):
     def test_chat_stream(self):
         # Chat stream with credits and usage on the last chunk.
         resp = sse(
-            {'object': 'chat.completion.chunk', 'model': 'gemini-4-argon',
+            {'object': 'chat.completion.chunk', 'model': 'gemini-4-carbon',
              'choices': [{'delta': {'content': '{"a"'}, 'index': 0}]},
             {'object': 'chat.completion.chunk',
              'choices': [{'delta': {'content': ': 6}'}, 'finish_reason': 'stop', 'index': 0}]},

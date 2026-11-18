@@ -168,12 +168,12 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_generate_returns_geometry(self):
         calls = []
         with mock.patch.object(service, 'aihubmix_chat_json', fake(GEOMETRY, calls)):
-            out = await service.generate(KEY, 'openai/gpt-6-astra', IMAGE, UNDERSTANDING)
+            out = await service.generate(KEY, 'openai/gpt-6.2-astra', IMAGE, UNDERSTANDING)
         parts = calls[0]['messages'][-1]['content']
         self.assertEqual(parts[0]['type'], 'image_url')
         self.assertIn('Ø19', parts[1]['text'])
         self.assertEqual(out['geometry']['entities'][0]['dimension_ref'], 'd1')
-        self.assertEqual(out['model_name'], 'GPT-6 Astra')
+        self.assertEqual(out['model_name'], 'GPT-6.2 Astra')
 
     async def test_score_uses_judge_and_computes(self):
         calls = []
@@ -189,7 +189,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([j['item_id'] for j in out['judgements']], ['C01', 'C02', 'C03'])
         self.assertIn('meta', out)
 
-        qwen = get_model('openai/gpt-6-astra')
+        qwen = get_model('openai/gpt-6.2-astra')
         with mock.patch.object(service, 'aihubmix_chat_json', fake(content, calls)):
             await service.score(KEY, RUBRIC, UNDERSTANDING, qwen)
         with mock.patch.object(service, 'aihubmix_chat_json', fake({'groups': []}, calls)):
@@ -202,7 +202,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_judge_model_lookup(self):
         self.assertIs(judge_model(None), JUDGE_MODEL)
         self.assertIs(judge_model('anthropic/claude-opus-5.5'), JUDGE_MODEL)
-        self.assertIs(judge_model('openai/gpt-6-astra'), get_model('openai/gpt-6-astra'))
+        self.assertIs(judge_model('openai/gpt-6.2-astra'), get_model('openai/gpt-6.2-astra'))
         with self.assertRaises(KeyError):
             judge_model('x/unknown')
 
@@ -261,7 +261,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             'singletons': [{'label': 'R5', 'models': ['B'], 'summary': '圆角'}],
         }
         results = [{'model_name': 'Claude Opus 5.5', 'understanding': UNDERSTANDING},
-                   {'model_name': 'GPT-6 Astra', 'understanding': UNDERSTANDING}]
+                   {'model_name': 'GPT-6.2 Astra', 'understanding': UNDERSTANDING}]
         with mock.patch.object(service, 'aihubmix_chat_json', fake(content, calls)):
             out = await service.consensus(KEY, results)
         self.assertIs(calls[0]['model'], JUDGE_MODEL)
@@ -270,8 +270,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('GPT', sent)
         self.assertIn('模型 A', sent)
         self.assertEqual(out['groups'][0]['interpretations'][0]['models'],
-                         ['Claude Opus 5.5', 'GPT-6 Astra'])
-        self.assertEqual(out['singletons'][0]['models'], ['GPT-6 Astra'])
+                         ['Claude Opus 5.5', 'GPT-6.2 Astra'])
+        self.assertEqual(out['singletons'][0]['models'], ['GPT-6.2 Astra'])
         self.assertIn('meta', out)
 
     async def test_consensus_rejects_unknown_letter(self):
