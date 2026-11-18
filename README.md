@@ -156,7 +156,7 @@ bash deploy/sync-vision-samples.sh ~/Documents/AI/ragent-lab-vision-samples
 
 模型分三类，都在服务器上调用，Key 不会发给浏览器：
 
-- **模型目录**（`src/ragent_lab/vision/registry.py`）：Claude Fable 5.2、Claude Opus 5.5、GPT-6.2 Astra、Gemini 4 Carbon、GLM-5V Turbo、Kimi K3.1 Pro、Seed 2.1 Turbo、MiniMax M3，全部用服务器的 `AIHUBMIX_API_KEY` 经 AIHubMix 调用（Claude 走原生 Messages 接口，其余走 Chat Completions + JSON Schema）。没有 `AIHUBMIX_API_KEY` 时目录为空。
+- **模型目录**（`src/ragent_lab/vision/registry.py`）：Claude Fable 5.2、Claude Opus 5.5、GPT-6.2 Astra、Gemini 4 Hydrogen、GLM-5V Turbo、Kimi K3.1 Pro、Seed 2.1 Turbo、MiniMax M3，全部用服务器的 `AIHUBMIX_API_KEY` 经 AIHubMix 调用（Claude 走原生 Messages 接口，其余走 Chat Completions + JSON Schema）。没有 `AIHUBMIX_API_KEY` 时目录为空。
 - **内置模型**（`VISION_BUILTIN_MODELS`）：直连模型厂商自己的接口，例如 DeepSeek、Qwen（阿里云百炼）。阿里云的 Key 只在创建它的地域和套餐对应的地址上有效：普通百炼 Key 用 `https://dashscope.aliyuncs.com/compatible-mode/v1`，Token Plan 的 `sk-sp-…` Key 用 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；地址不对会返回 401 “Incorrect API key”。
 - **自定义模型**：访客自己填接口地址、模型名和 Key。预设可一键填好 DeepSeek、Moonshot（Kimi）、阿里云百炼（Qwen）、智谱（GLM）、OpenAI、Anthropic 官方接口的地址和格式；支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三种格式。服务器只调用公网 https 地址，解析到本机或内网的地址会被拒绝，也不跟随重定向。
 
@@ -199,7 +199,7 @@ VISION_BUILTIN_MODELS='[
    docker logs -f ragent-lab-api-1 2>&1 | grep 'vision call'
    # INFO:     ragent_lab.vision.service vision call ok task=understanding model=anthropic/claude-opus-5.5
    #           source=catalog upstream=AIHubMix upstream_model=claude-opus-5-5 took=61.2s out_tokens=6718 finish=end_turn
-   # WARNING:  ragent_lab.vision.service vision call failed task=geometry model=google/gemini-4-carbon
+   # WARNING:  ragent_lab.vision.service vision call failed task=geometry model=google/gemini-4-hydrogen
    #           source=catalog after=1.3s kind=upstream: AIHubMix 拒绝了请求（400）：…
    ```
 
@@ -213,7 +213,7 @@ VISION_BUILTIN_MODELS='[
    set -a; . /opt/rag-lab/current/.env; set +a
    curl -s https://aihubmix.com/v1/chat/completions -H "Authorization: Bearer $AIHUBMIX_API_KEY" \
      -H 'Content-Type: application/json' \
-     -d '{"model":"gemini-4-carbon","messages":[{"role":"user","content":"ping"}],"max_tokens":20}'
+     -d '{"model":"gemini-4-hydrogen","messages":[{"role":"user","content":"ping"}],"max_tokens":20}'
    curl -s https://aihubmix.com/v1/models -H "Authorization: Bearer $AIHUBMIX_API_KEY" | head -c 500
    ```
 
@@ -231,7 +231,7 @@ VISION_BUILTIN_MODELS='[
 | MiniMax M3 | 100 / 100 | 69.2 | ≈ 7 分钟 | 需 64k 输出 token |
 | Seed 2.1 Turbo | 67 / 75 | 57.7 | ≈ 11 分钟 | |
 
-2026-11-18 起目录里的 GPT 换成 GPT-6.2 Astra、Gemini 换成 Gemini 4 Carbon，上表是旧版本（GPT-6 Astra、Gemini 4 Argon）的成绩，新版本尚未重测打分。换用前在支架图上做过一次理解 + 还原：GPT-6.2 Astra 理解约 46 秒、还原约 32 秒，三视图和关键尺寸（390、195、R108、66、82、160、2-φ19、R240）都读出，还原无尺寸警告；Gemini 4 Carbon 理解约 5.7 分钟、还原约 3.5 分钟，关键尺寸都读出，还原有 2 条「20+20」的尺寸警告。Gemini 4 Carbon 较慢，离 10 分钟的单次调用上限更近。
+2026-11-18 起目录里的 GPT 换成 GPT-6.2 Astra、Gemini 换成 Gemini 4 Hydrogen（先短暂用过 Gemini 4 Carbon），上表是旧版本（GPT-6 Astra、Gemini 4 Argon）的成绩，新版本尚未重测打分。换用前在支架图上做过一次理解 + 还原：GPT-6.2 Astra 理解约 46 秒、还原约 32 秒，三视图和关键尺寸（390、195、R108、66、82、160、2-φ19、R240）都读出，还原无尺寸警告；Gemini 4 Carbon 理解约 5.7 分钟、还原约 3.5 分钟，关键尺寸都读出，还原有 2 条「20+20」的尺寸警告。同日 Gemini 换成更快的 Gemini 4 Hydrogen：理解约 3.2 分钟、还原约 1.1 分钟，关键尺寸都读出，还原无尺寸警告；它的输出较长（理解用了约 2.8 万 token），32k 上限会截断，所以给了 64k。
 | DeepSeek V4.1 Flash | 92 / 100 | 53.8 | ≈ 2 分钟 | 关闭思考时约 10 秒 |
 | GLM-5V Turbo | 83 / 92 | 42.3 | ≈ 3 分钟 | |
 
