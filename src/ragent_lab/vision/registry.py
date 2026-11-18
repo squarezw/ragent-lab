@@ -27,8 +27,9 @@ VISION_MODELS: list[dict] = [
     _m('anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'anthropic', _claude('claude-opus-5-5')),
     _m('openai/gpt-6.2-astra', 'GPT-6.2 Astra', 'openai', _chat('gpt-6.2-astra')),
     # Gemini's schema validator needs anyOf instead of oneOf and no length/count limits.
-    _m('google/gemini-4-carbon', 'Gemini 4 Carbon', 'google',
-       _chat('gemini-4-carbon', lean_schema=True)),
+    # 32k output tokens ran out on the bracket drawing (28k used when it fit).
+    _m('google/gemini-4-hydrogen', 'Gemini 4 Hydrogen', 'google',
+       _chat('gemini-4-hydrogen', lean_schema=True), max_tokens=64000),
     _m('z-ai/glm-5v-turbo', 'GLM-5V Turbo', 'zhipu', _chat('glm-5v-turbo')),
     # Thinking models: 32k output tokens ran out on the bracket drawing.
     _m('moonshotai/kimi-k3.1-pro', 'Kimi K3.1 Pro', 'moonshot', _chat('kimi-k3.1-pro'),

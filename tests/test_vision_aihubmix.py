@@ -86,7 +86,7 @@ class AIHubMixTests(unittest.TestCase):
             'choices': [{'finish_reason': 'stop', 'message': {'content': '{"a": 2}'}}]}))
         compat.transport = httpx.MockTransport(handler)
         try:
-            asyncio.run(aihubmix.chat_json(KEY, get_model('google/gemini-4-carbon'), MSGS, 'geometry',
+            asyncio.run(aihubmix.chat_json(KEY, get_model('google/gemini-4-hydrogen'), MSGS, 'geometry',
                                            model_json_schema_for(Geometry)))
         finally:
             compat.transport = None

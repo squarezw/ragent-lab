@@ -160,9 +160,9 @@ class VisionAPITests(unittest.TestCase):
             r = client.post('/api/vision/consensus', json={'results': two, 'access_code': CODE})
             self.assertEqual(self._wait(client, r.json()['job_id'])[0]['status'], 'done')
             r = client.post('/api/vision/consensus', json={
-                'results': two, 'access_code': CODE, 'judge_model': 'google/gemini-4-carbon'})
+                'results': two, 'access_code': CODE, 'judge_model': 'google/gemini-4-hydrogen'})
             job, _ = self._wait(client, r.json()['job_id'])
-            self.assertEqual(job['result']['meta']['judge'], 'google/gemini-4-carbon')
+            self.assertEqual(job['result']['meta']['judge'], 'google/gemini-4-hydrogen')
             for path, extra in (('score', {'sample_id': 'ok', 'understanding': UNDERSTANDING}),
                                 ('consensus', {'results': two})):
                 r = client.post(f'/api/vision/{path}', json={
