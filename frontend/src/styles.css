@@ -3204,3 +3204,69 @@ main {
 .vision-generation.is-cancelled {
   border-style: dashed;
 }
+
+/* Step 1, uploaded PDF: choose direct conversion or read-and-redraw. */
+.convert-mode {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  margin: 14px 0 10px;
+  display: grid;
+  gap: 8px;
+}
+.convert-mode legend {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 4px;
+}
+.convert-mode label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.convert-mode label.active {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+}
+.convert-mode label input[type="radio"] {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  flex: none;
+  margin: 3px 0 0;
+  padding: 0;
+  box-shadow: none;
+}
+.convert-mode label span {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  text-align: left;
+}
+.convert-mode small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.direct-convert {
+  display: grid;
+  gap: 8px;
+}
+.direct-convert-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.direct-convert-row input {
+  width: 96px;
+}
+.direct-convert-facts {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+}

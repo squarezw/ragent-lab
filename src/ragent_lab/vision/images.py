@@ -46,6 +46,8 @@ class PreparedImage:
     height: int
     sha256: str
     source_name: str
+    # The uploaded PDF itself, kept for the direct PDF -> DXF conversion (None for pictures).
+    pdf: bytes | None = None
 
 
 def _render_pdf(data: bytes) -> Image.Image:
@@ -99,7 +101,8 @@ def _to_rgb(img: Image.Image) -> Image.Image:
 def prepare_image(data: bytes, filename: str) -> PreparedImage:
     if len(data) > MAX_UPLOAD_BYTES:
         raise ImageRejected('文件超过 15 MB 上限')
-    if data.startswith(b'%PDF'):
+    pdf = data if data.startswith(b'%PDF') else None
+    if pdf is not None:
         img = _render_pdf(data)
     else:
         img = _decode_raster(data)
@@ -116,7 +119,7 @@ def prepare_image(data: bytes, filename: str) -> PreparedImage:
     png = buf.getvalue()
     return PreparedImage(
         id=uuid.uuid4().hex, png=png, width=img.width, height=img.height,
-        sha256=hashlib.sha256(png).hexdigest(), source_name=filename,
+        sha256=hashlib.sha256(png).hexdigest(), source_name=filename, pdf=pdf,
     )
 
 
@@ -160,7 +163,10 @@ class ImageStore:
         png, meta = paths
         meta_data = {'width': img.width, 'height': img.height, 'sha256': img.sha256,
                      'source_name': img.source_name}
-        for path, data in ((png, img.png), (meta, json.dumps(meta_data).encode())):
+        files = [(png, img.png), (meta, json.dumps(meta_data).encode())]
+        if img.pdf is not None:
+            files.insert(0, (png.with_suffix('.pdf'), img.pdf))
+        for path, data in files:
             tmp = path.with_suffix(path.suffix + '.tmp')
             tmp.write_bytes(data)
             tmp.replace(path)
@@ -176,9 +182,11 @@ class ImageStore:
                 self._delete(id)
                 return None
             info = json.loads(meta.read_text('utf-8'))
+            pdf_path = png.with_suffix('.pdf')
             img = PreparedImage(id=id, png=png.read_bytes(), width=int(info['width']),
                                 height=int(info['height']), sha256=str(info['sha256']),
-                                source_name=str(info.get('source_name', '')))
+                                source_name=str(info.get('source_name', '')),
+                                pdf=pdf_path.read_bytes() if pdf_path.is_file() else None)
         except (OSError, ValueError, KeyError, TypeError):
             return None
         return saved, img
@@ -186,6 +194,8 @@ class ImageStore:
     def _delete(self, id: str) -> None:
         for path in self._paths(id) or ():
             path.unlink(missing_ok=True)
+            if path.suffix == '.png':
+                path.with_suffix('.pdf').unlink(missing_ok=True)
 
     def _purge_disk(self, now: float) -> None:
         if not self._root or now - self._last_disk_purge < _PURGE_EVERY:

@@ -170,8 +170,11 @@ async function mockVision(
     cancelled?: string[];
     builtin?: unknown;
     failGenerateOnce?: boolean;
+    uploadName?: string;
+    converts?: Record<string, unknown>[];
   },
 ) {
+  const converts = opts.converts ?? [];
   const jobs = new Map<string, Job>();
   let uploads = 0;
   let goneServed = false;
@@ -223,6 +226,20 @@ async function mockVision(
           singletons: [
             { label: "倒角 C1", models: ["Model B"], summary: "只有一处倒角" },
           ],
+        };
+      case "convert":
+        return {
+          svg: SVG,
+          download_id: "dl-1",
+          report: {
+            route: "vector",
+            scale: 2.834646,
+            scale_source: "labels",
+            sheet: [841.8, 595.3],
+            entities: { LINE: 18, CIRCLE: 1, TEXT: 4, ARC: 0 },
+            centre_lines_from_geometry: 4,
+            warnings: ["这份 PDF 按 1 点 = 1 毫米绘制"],
+          },
         };
       default:
         return {
@@ -281,9 +298,16 @@ async function mockVision(
           width: 1,
           height: 1,
           sha256: "x",
-          name: "mine.png",
+          name: opts.uploadName ?? "mine.png",
+          pdf: (opts.uploadName ?? "").endsWith(".pdf"),
         },
       });
+    if (path === "/convert") {
+      converts.push(body);
+      return route.fulfill(addJob({ kind: "convert" }));
+    }
+    if (path.startsWith("/converted/"))
+      return route.fulfill({ body: "0\nEOF\n", contentType: "application/dxf" });
     if (path === "/understand") {
       if (opts.uploadGoneOnce && body.image.id === "up-1") {
         goneServed = true;
@@ -796,4 +820,33 @@ test("vision: a failed redraw can be retried in the same card", async ({ page })
   await expect(gen.getByLabel("还原预览")).toBeVisible({ timeout: 20000 });
   await expect(gen).not.toContainText("模型输出无法解析为 JSON。");
   await expect(gen.getByRole("button", { name: "重试" })).toHaveCount(0);
+});
+
+test("vision: an uploaded PDF can be converted directly, without a model", async ({ page }) => {
+  const converts: Record<string, unknown>[] = [];
+  const understood: unknown[] = [];
+  await mockVision(page, { samples: [], uploadName: "plate.pdf", converts });
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/vision/understand")) understood.push(r.postDataJSON());
+  });
+  await page.goto("/#vision");
+  await page.getByLabel("上传图片").setInputFiles({ name: "plate.pdf", mimeType: "application/pdf", buffer: PNG_1x1 });
+  await expect(page.getByText("这份 PDF 怎么转换")).toBeVisible();
+  await expect(page.getByLabel("直接转换（不重绘）", { exact: false })).toBeChecked();
+  await expect(page.getByRole("button", { name: /下一步：理解对比/ })).toHaveCount(0);
+  await page.getByLabel("比例（可选）").fill("-3");
+  await page.getByRole("button", { name: "直接转换" }).click();
+  await expect(page.getByText("比例请填写大于 0 的数字", { exact: false })).toBeVisible();
+  await page.getByLabel("比例（可选）").fill("");
+  await page.getByRole("button", { name: "直接转换" }).click();
+  await expect(page.getByRole("figure", { name: "直接转换预览" })).toBeVisible({ timeout: 20000 });
+  expect(converts[0]).toMatchObject({ image: { kind: "upload" }, scale: null });
+  await expect(page.getByText("按图上的标注尺寸换算")).toBeVisible();
+  await expect(page.getByText("4 条虚线按位置判定为中心线", { exact: false })).toBeVisible();
+  await expect(page.getByText("1 点 = 1 毫米", { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载 DXF" })).toHaveAttribute("href", "/api/vision/converted/dl-1");
+  expect(understood).toHaveLength(0);
+  // The redraw option goes back to the model workflow.
+  await page.getByLabel("理解后重绘", { exact: false }).check();
+  await expect(page.getByRole("button", { name: /下一步：理解对比/ })).toBeVisible();
 });
