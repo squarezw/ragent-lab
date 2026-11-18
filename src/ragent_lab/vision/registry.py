@@ -25,10 +25,10 @@ def _claude(model: str) -> dict:
 VISION_MODELS: list[dict] = [
     _m('anthropic/claude-fable-5.2', 'Claude Fable 5.2', 'anthropic', _claude('claude-fable-5-2')),
     _m('anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'anthropic', _claude('claude-opus-5-5')),
-    _m('openai/gpt-6-astra', 'GPT-6 Astra', 'openai', _chat('gpt-6-astra')),
+    _m('openai/gpt-6.2-astra', 'GPT-6.2 Astra', 'openai', _chat('gpt-6.2-astra')),
     # Gemini's schema validator needs anyOf instead of oneOf and no length/count limits.
-    _m('google/gemini-4-argon', 'Gemini 4 Argon', 'google',
-       _chat('gemini-4-argon', lean_schema=True)),
+    _m('google/gemini-4-carbon', 'Gemini 4 Carbon', 'google',
+       _chat('gemini-4-carbon', lean_schema=True)),
     _m('z-ai/glm-5v-turbo', 'GLM-5V Turbo', 'zhipu', _chat('glm-5v-turbo')),
     # Thinking models: 32k output tokens ran out on the bracket drawing.
     _m('moonshotai/kimi-k3.1-pro', 'Kimi K3.1 Pro', 'moonshot', _chat('kimi-k3.1-pro'),

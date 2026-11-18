@@ -152,17 +152,17 @@ class VisionAPITests(unittest.TestCase):
             self.assertEqual(job['result']['meta']['judge'], 'anthropic/claude-opus-5.5')
             r = client.post('/api/vision/score', json={
                 'sample_id': 'ok', 'understanding': UNDERSTANDING, 'access_code': CODE,
-                'judge_model': 'openai/gpt-6-astra'})
+                'judge_model': 'openai/gpt-6.2-astra'})
             job, _ = self._wait(client, r.json()['job_id'])
-            self.assertEqual(job['result']['meta']['judge'], 'openai/gpt-6-astra')
+            self.assertEqual(job['result']['meta']['judge'], 'openai/gpt-6.2-astra')
             two = [{'model_name': 'A', 'understanding': UNDERSTANDING},
                    {'model_name': 'B', 'understanding': UNDERSTANDING}]
             r = client.post('/api/vision/consensus', json={'results': two, 'access_code': CODE})
             self.assertEqual(self._wait(client, r.json()['job_id'])[0]['status'], 'done')
             r = client.post('/api/vision/consensus', json={
-                'results': two, 'access_code': CODE, 'judge_model': 'google/gemini-4-argon'})
+                'results': two, 'access_code': CODE, 'judge_model': 'google/gemini-4-carbon'})
             job, _ = self._wait(client, r.json()['job_id'])
-            self.assertEqual(job['result']['meta']['judge'], 'google/gemini-4-argon')
+            self.assertEqual(job['result']['meta']['judge'], 'google/gemini-4-carbon')
             for path, extra in (('score', {'sample_id': 'ok', 'understanding': UNDERSTANDING}),
                                 ('consensus', {'results': two})):
                 r = client.post(f'/api/vision/{path}', json={
