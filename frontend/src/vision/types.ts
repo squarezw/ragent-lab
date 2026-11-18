@@ -41,6 +41,26 @@ export type UploadedImage = {
   height: number;
   sha256: string;
   name: string;
+  // The upload is a PDF (it can also be converted directly to DXF).
+  pdf?: boolean;
+};
+
+// Direct PDF -> DXF conversion (no model): see src/ragent_lab/vision/pdf2dxf.
+export type ConvertReport = {
+  route: "vector";
+  scale: number;
+  // "labels", "given", "paper", or "1:N" for a scale note
+  scale_source: string;
+  sheet: [number, number];
+  entities: Record<string, number>;
+  centre_lines_from_geometry: number;
+  warnings: string[];
+};
+
+export type ConvertResult = {
+  report: ConvertReport;
+  svg: string;
+  download_id: string;
 };
 
 export type ViewType =

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
+import uuid
 from typing import Annotated, Literal, Union
 from urllib.parse import quote
 
@@ -10,7 +12,7 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from ..vision import netguard, prompts, render, service
+from ..vision import netguard, pdf2dxf, prompts, render, service
 from ..vision.builtin import builtins
 from ..vision.images import (MAX_UPLOAD_BYTES, ImageRejected, PreparedImage, get_sample,
                              images, load_samples, prepare_image)
@@ -291,7 +293,7 @@ async def upload_image(file: UploadFile = File(...)):
         raise HTTPException(422, str(exc)) from None
     images.put(prepared)
     return {'image_id': prepared.id, 'width': prepared.width, 'height': prepared.height,
-            'sha256': prepared.sha256, 'name': name}
+            'sha256': prepared.sha256, 'name': name, 'pdf': prepared.pdf is not None}
 
 
 @router.post('/understand')
@@ -399,6 +401,71 @@ async def export(body: ExportBody):
     media = 'application/pdf' if body.format == 'pdf' else 'application/dxf'
     disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
     return Response(data, media_type=media, headers={'Content-Disposition': disposition})
+
+
+class ConvertBody(_Body):
+    image: ImageRef
+    # Real units per paper unit; None = automatic (from the dimension labels or a scale note).
+    scale: float | None = Field(default=None, gt=0, le=100000)
+
+
+# Converted DXF files, kept for an hour for download: id -> (time, bytes, file name).
+_converted: dict[str, tuple[float, bytes, str]] = {}
+_CONVERTED_TTL = 3600.0
+_CONVERTED_MAX = 50
+
+
+def _keep_converted(data: bytes, name: str) -> str:
+    now = time.time()
+    for k in [k for k, v in _converted.items() if now - v[0] > _CONVERTED_TTL]:
+        del _converted[k]
+    while len(_converted) >= _CONVERTED_MAX:
+        del _converted[min(_converted, key=lambda k: _converted[k][0])]
+    cid = uuid.uuid4().hex
+    _converted[cid] = (now, data, name)
+    return cid
+
+
+def _convert_pdf(pdf: bytes, scale: float | None) -> dict:
+    data, report, doc = pdf2dxf.convert_pdf(pdf, scale)
+    return {'report': report, 'svg': render.to_svg(doc), 'data': data}
+
+
+@router.post('/convert')
+async def convert(body: ConvertBody):
+    """Direct PDF -> DXF (no model): copy the drawing exactly, scaled from its own labels."""
+    if body.image.kind != 'upload':
+        raise HTTPException(422, '直接转换只支持上传的 PDF')
+    image = images.get(body.image.id)
+    if image is None:
+        raise HTTPException(404, '图片已过期，请重新上传')
+    if image.pdf is None:
+        raise HTTPException(422, '直接转换只支持 PDF；图片请用「理解后重绘」')
+    stem = re.sub(r'\.pdf$', '', image.source_name or 'drawing', flags=re.I) or 'drawing'
+
+    async def factory():
+        try:
+            out = await bounded_render('convert', _convert_pdf, image.pdf, body.scale)
+        except RenderBusy:
+            raise ModelError('timeout', RENDER_BUSY) from None
+        except pdf2dxf.NotVector as exc:
+            raise ModelError('invalid_output', f'{exc}。扫描件请用「理解后重绘」。') from None
+        except ValueError as exc:
+            raise ModelError('invalid_output', str(exc)) from None
+        cid = _keep_converted(out['data'], f'{stem}.dxf')
+        return {'report': out['report'], 'svg': out['svg'], 'download_id': cid}
+    return _job('convert', image.source_name or 'PDF', factory)
+
+
+@router.get('/converted/{cid}')
+def converted(cid: str):
+    item = _converted.get(cid)
+    if item is None or time.time() - item[0] > _CONVERTED_TTL:
+        raise HTTPException(404, '转换结果已过期，请重新转换')
+    _, data, name = item
+    ascii_name = re.sub(r'[^A-Za-z0-9._-]+', '_', name) or 'drawing.dxf'
+    disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+    return Response(data, media_type='application/dxf', headers={'Content-Disposition': disposition})
 
 
 @router.post('/jobs/{job_id}/cancel')

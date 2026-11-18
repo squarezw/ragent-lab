@@ -557,3 +557,107 @@ class ModelRefAPITests(unittest.TestCase):
             r = self._understand(client, {**ref, 'api': 'grpc'})
             self.assertEqual(r.status_code, 422)
             self.assertNotIn('sk-custom-secret', r.text)
+
+
+def _vector_pdf() -> bytes:
+    """A one-page vector drawing drawn with 1 point = 1 mm: a 200 x 120 plate, an R30 circle,
+    dimensions 200 / 120 / R30, dashed centre lines and a SCALE 1:1 note."""
+    k = 0.5523 * 30                                   # Bezier control offset for a circle of r 30
+    content = '\n'.join([
+        '1.6 w 150 260 200 120 re S',
+        f'1.4 w 415 320 m 415 {320 + k:.2f} {385 + k:.2f} 350 385 350 c {385 - k:.2f} 350 355 {320 + k:.2f} 355 320 c',
+        f'355 {320 - k:.2f} {385 - k:.2f} 290 385 290 c {385 + k:.2f} 290 415 {320 - k:.2f} 415 320 c S',
+        '[6 3] 0 d 0.4 w 355 320 m 415 320 l S 385 290 m 385 350 l S 138 320 m 362 320 l S 250 248 m 250 392 l S',
+        '[] 0 d 0.5 w 150 215 m 350 215 l S 150 209 m 150 221 l S 350 209 m 350 221 l S',
+        '105 260 m 105 380 l S 99 260 m 111 260 l S 99 380 m 111 380 l S',
+        '400 345 m 455 400 l S',
+        'BT /F1 10 Tf 238 221 Td (200) Tj ET',
+        'BT /F1 10 Tf 111 320 Td (120) Tj ET',
+        'BT /F1 9 Tf 458 402 Td (R30) Tj ET',
+        'BT /F1 8 Tf 650 44 Td (SCALE 1:1) Tj ET',
+    ]).encode()
+    objs = [b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Contents 4 0 R '
+            b'/Resources << /Font << /F1 5 0 R >> >> >>',
+            b'<< /Length %d >>\nstream\n' % len(content) + content + b'\nendstream',
+            b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']
+    out = bytearray(b'%PDF-1.4\n')
+    offsets = []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b'%d 0 obj\n' % i + body + b'\nendobj\n'
+    xref = len(out)
+    out += b'xref\n0 %d\n0000000000 65535 f \n' % (len(objs) + 1)
+    out += b''.join(b'%010d 00000 n \n' % o for o in offsets)
+    out += b'trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n' % (len(objs) + 1, xref)
+    return bytes(out)
+
+
+def _scanned_pdf() -> bytes:
+    buf = io.BytesIO()
+    Image.new('RGB', (400, 300), 'white').save(buf, 'PDF', resolution=100)
+    return buf.getvalue()
+
+
+class ConvertAPITests(unittest.TestCase):
+    """Direct PDF -> DXF (no model)."""
+    _wait = VisionAPITests._wait
+
+    def setUp(self):
+        VisionAPITests.setUp(self)
+
+    def _upload(self, client, data: bytes, name: str):
+        r = client.post('/api/vision/images', files={'file': (name, data, 'application/pdf')})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def test_vector_pdf_converts_at_the_labelled_size(self):
+        import ezdxf
+        with TestClient(app) as client:
+            up = self._upload(client, _vector_pdf(), '测试.pdf')
+            self.assertIs(up['pdf'], True)
+            r = client.post('/api/vision/convert', json={'image': {'kind': 'upload', 'id': up['image_id']}})
+            job, _ = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['status'], 'done', job)
+            res = job['result']
+            rep = res['report']
+            self.assertEqual(rep['scale_source'], 'labels')
+            self.assertAlmostEqual(rep['scale'], 72 / 25.4, places=2)
+            self.assertTrue(any('1 点 = 1 毫米' in w for w in rep['warnings']))
+            self.assertEqual(rep['centre_lines_from_geometry'], 4)
+            self.assertIn('<svg', res['svg'])
+            dl = client.get(f"/api/vision/converted/{res['download_id']}")
+            self.assertEqual(dl.status_code, 200)
+            self.assertIn('filename*=UTF-8', dl.headers['content-disposition'])
+            doc = ezdxf.read(io.StringIO(dl.content.decode('utf-8')))
+            msp = doc.modelspace()
+            [circle] = msp.query('CIRCLE')
+            self.assertAlmostEqual(circle.dxf.radius, 30, delta=0.05)
+            self.assertEqual(len([e for e in msp.query('LINE') if e.dxf.layer == 'CENTER']), 4)
+
+    def test_given_scale_is_used(self):
+        with TestClient(app) as client:
+            up = self._upload(client, _vector_pdf(), 'plate.pdf')
+            r = client.post('/api/vision/convert', json={'image': {'kind': 'upload', 'id': up['image_id']},
+                                                          'scale': 1})
+            job, _ = self._wait(client, r.json()['job_id'])
+            self.assertEqual((job['result']['report']['scale'], job['result']['report']['scale_source']),
+                             (1.0, 'given'))
+
+    def test_pictures_scans_and_unknown_downloads_are_refused(self):
+        with TestClient(app) as client:
+            png = client.post('/api/vision/images', files={'file': ('x.png', _png(), 'image/png')}).json()
+            self.assertIs(png['pdf'], False)
+            r = client.post('/api/vision/convert', json={'image': {'kind': 'upload', 'id': png['image_id']}})
+            self.assertEqual(r.status_code, 422)
+            r = client.post('/api/vision/convert', json={'image': {'kind': 'sample', 'id': 'ok'}})
+            self.assertEqual(r.status_code, 422)
+            r = client.post('/api/vision/convert', json={'image': {'kind': 'upload', 'id': '0' * 32}})
+            self.assertEqual(r.status_code, 404)
+            scan = self._upload(client, _scanned_pdf(), 'scan.pdf')
+            r = client.post('/api/vision/convert', json={'image': {'kind': 'upload', 'id': scan['image_id']}})
+            job, _ = self._wait(client, r.json()['job_id'])
+            self.assertEqual(job['status'], 'failed')
+            self.assertIn('理解后重绘', job['error'])
+            self.assertEqual(client.get('/api/vision/converted/nope').status_code, 404)

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DirectConvert from "./DirectConvert";
 import {
   ArrowRight,
   ImageUp,
@@ -56,6 +57,9 @@ export default function StepSelect({
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  // For an uploaded PDF: copy it directly to DXF (no model), or read it and redraw (steps 2-3).
+  const [mode, setMode] = useState<"direct" | "redraw">("direct");
+  const isPdf = image?.kind === "upload" && /\.pdf$/i.test(imageName);
 
   async function upload(file: File | undefined) {
     if (!file) return;
@@ -253,15 +257,48 @@ export default function StepSelect({
               </p>
             )}
           </div>
-          <button
-            type="button"
-            className="button primary run-button"
-            disabled={!image || uploading}
-            onClick={onNext}
-          >
-            下一步：理解对比
-            <ArrowRight size={16} />
-          </button>
+          {isPdf && image && (
+            <fieldset className="convert-mode">
+              <legend>这份 PDF 怎么转换</legend>
+              <label className={mode === "direct" ? "active" : ""}>
+                <input
+                  type="radio"
+                  name="convert-mode"
+                  checked={mode === "direct"}
+                  onChange={() => setMode("direct")}
+                />
+                <span>
+                  <strong>直接转换（不重绘）</strong>
+                  <small>逐条复制 PDF 里的线条，几秒完成，不用模型。原图怎么画就怎么转。</small>
+                </span>
+              </label>
+              <label className={mode === "redraw" ? "active" : ""}>
+                <input
+                  type="radio"
+                  name="convert-mode"
+                  checked={mode === "redraw"}
+                  onChange={() => setMode("redraw")}
+                />
+                <span>
+                  <strong>理解后重绘</strong>
+                  <small>模型读图，再按标注尺寸重画。原图没按比例画、或是扫描件时用这个。</small>
+                </span>
+              </label>
+            </fieldset>
+          )}
+          {isPdf && image && mode === "direct" ? (
+            <DirectConvert image={image} imageName={imageName} />
+          ) : (
+            <button
+              type="button"
+              className="button primary run-button"
+              disabled={!image || uploading}
+              onClick={onNext}
+            >
+              下一步：理解对比
+              <ArrowRight size={16} />
+            </button>
+          )}
         </Panel>
       </div>
       <Panel

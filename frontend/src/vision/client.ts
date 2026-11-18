@@ -52,7 +52,11 @@ export function cancelJob(id: string): void {
   }).catch(() => undefined);
 }
 
-export type SubmitKind = "understand" | "score" | "consensus" | "generate";
+export type SubmitKind = "understand" | "score" | "consensus" | "generate" | "convert";
+
+// Download link of a direct PDF -> DXF conversion (kept on the server for an hour).
+export const convertedUrl = (id: string) =>
+  `/api/vision/converted/${encodeURIComponent(id)}`;
 
 export async function submit(kind: SubmitKind, body: unknown): Promise<string> {
   const out = await api<{ job_id: string }>(`/vision/${kind}`, body);
